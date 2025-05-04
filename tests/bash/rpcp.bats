@@ -11,9 +11,9 @@
 #     4. folder-ignore pattern ("build")
 #     5. behaviour when --show-copied-files is used
 #
-
-load 'test_helper/bats-support/load'   # optional if you like bats-support
-load 'test_helper/bats-assert/load'    #  │   for nicer asserts
+export BATS_LIB_PATH="$PWD/tests/test_helper"
+load 'test_helper/bats-support/load'
+load 'test_helper/bats-assert/load'
 
 setup() {
   # ── ① disposable sandbox repo ──────────────────────────────
