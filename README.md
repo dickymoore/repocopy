@@ -155,9 +155,22 @@ After running `rpcp`, your clipboard contains all relevant files with context. P
 
 ## 🧪 Testing & Linting
 
-- **Pester**: Write tests for PowerShell functions.
-- **PSScriptAnalyzer**: Validate PowerShell style.
-- **ShellCheck**: Lint the Bash script.
+# Running tests locally
+
+## Bash (Bats)
+
+```bash
+sudo apt install bats jq xclip   # or the equivalent for your OS
+bats tests/bash/repocopy.bats
+```
+
+## PowerShell (Pester)
+
+```
+Install-Module Pester -Force -Scope CurrentUser  # once
+Invoke-Pester -Path tests/powershell -Output Detailed
+```
+
 
 ---
 

@@ -71,14 +71,16 @@ Param(
     [long]     $MaxFileSize,
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
+    [AllowNull()]
     [string[]] $IgnoreFolders,
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
+    [AllowNull()]
     [string[]] $IgnoreFiles,
 
     [Parameter()]
+    [AllowNull()]
+
     [hashtable]$Replacements,
 
     [Parameter()]
@@ -103,17 +105,20 @@ function Get-Config {
 function Get-FilesToInclude {
     [CmdletBinding()]
     Param(
-        [Parameter(Mandatory)]
+        [Parameter()]
         [ValidateScript({ Test-Path $_ -PathType Container })]
         [string]   $RepoRoot,
 
-        [Parameter(Mandatory)]
-        [string[]] $IgnoreFolders,
+        # ↓↓↓ CHANGE #1 – remove Mandatory, give default @()
+        [Parameter()]
+        [string[]] $IgnoreFolders = @(),
 
-        [Parameter(Mandatory)]
-        [string[]] $IgnoreFiles,
+        # ↓↓↓ CHANGE #2 – remove Mandatory, give default @()
+        [Parameter()]
+        [string[]] $IgnoreFiles   = @(),
 
-        [Parameter(Mandatory)]
+        [Parameter()]
+
         [ValidateRange(0, [long]::MaxValue)]
         [long]     $MaxFileSize
     )
@@ -125,8 +130,15 @@ function Get-FilesToInclude {
         # Folder pattern check
         $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar)
         foreach ($pat in $IgnoreFolders) {
-            if ($dirs -like $pat) {
-                $reason = "matched ignore-folder '$pat'"; break
+            $sepRegex   = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
+            $segments   = $f.DirectoryName -split $sepRegex      # safe on Win & *nix
+    
+            foreach ($pat in $IgnoreFolders) {
+                if ($segments -like $pat) {
+                    $reason = "matched ignore-folder '$pat'"
+                    break
+                }
+
             }
         }
         # File name check
@@ -228,15 +240,27 @@ $config = Get-Config -ConfigFilePath $ConfigFile
 # Merge CLI parameters over config values
 $rp = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else { $config.repoPath }
 $mf = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
-$if = if ($PSBoundParameters.ContainsKey('IgnoreFolders')) { $IgnoreFolders } else { @($config.ignoreFolders) }
-$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles')) { $IgnoreFiles } else { @($config.ignoreFiles) }
+$if  = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
+$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles')   -and $IgnoreFiles)   { $IgnoreFiles }   else { @($config.ignoreFiles) }
 $rep = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
     $h = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $h[$p.Name] = $p.Value }; $h
 }
-$scf = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) { $ShowCopiedFiles.IsPresent } else { [bool]$config.showCopiedFiles }
+$scf = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) {
+    $ShowCopiedFiles.IsPresent
+ } else {
+    [bool]$config.showCopiedFiles
+ }
+
+if ($null -eq $if)  { $if  = @() }
+if ($null -eq $ifl) { $ifl = @() }
 
 # Gather, filter, and log
-$filesToCopy = Get-FilesToInclude -RepoRoot $rp -IgnoreFolders $if -IgnoreFiles $ifl -MaxFileSize $mf
+$filesToCopy = Get-FilesToInclude `
+           -RepoRoot      $rp `
+           -IgnoreFolders $if `
+           -IgnoreFiles   $ifl `
+           -MaxFileSize   $mf
+
 
 if ($filesToCopy.Count -eq 0) {
     Write-Warning 'No files passed the filters; nothing to copy.'
