@@ -7,30 +7,24 @@ on:
     branches: [ main ]
 
 jobs:
-  # ───────────────────────── Bash side ─────────────────────────
   test-bash:
-    runs-on: ubuntu-latest          # Linux covers your .sh script
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y jq xclip bats
+      - name: Run Bash tests
+        run: bats tests/bash/rpcp.bats
 
-      # Install Bats (bash test runner)
-      - name: Set up Bats
-        uses: mig4/setup-bats@v1     # Tiny 1-line action :contentReference[oaicite:1]{index=1}
-        with:
-          bats-version: 1.12.0
-
-      - name: Run Bats tests
-        run: bats -r tests/bats      # adjust path if you keep tests elsewhere
-
-  # ─────────────────────── PowerShell side ─────────────────────
-  test-pwsh:
-    runs-on: windows-latest         # Gives you pwsh + Pester pre-installed :contentReference[oaicite:2]{index=2}
+  pester-tests:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Pester tests
+      - uses: actions/checkout@v3
+      - name: Install Pester
         shell: pwsh
         run: |
-          # Pester 5 is already in the image, but you can pin a version:
-          # Install-Module Pester -Force -RequiredVersion 5.6.0
-          Invoke-Pester -Path tests/pester -CI
+          Install-Module Pester -Force -Scope CurrentUser
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: |
+          Invoke-Pester -Path tests/powershell -CI -Output Detailed
