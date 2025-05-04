@@ -10,19 +10,22 @@ jobs:
   test-bash:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Bats
-        uses: mig4/setup-bats@v1
-        with:
-          bats-version: 1.12.0
-      - name: Run Bats tests
-        run: bats -r tests/bats
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y jq xclip bats
+      - name: Run Bash tests
+        run: bats tests/bash/rpcp.bats
 
-  test-powershell:
-    runs-on: windows-latest
+  pester-tests:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Run Pester tests
+      - uses: actions/checkout@v3
+      - name: Install PowerShell & Pester
+      - name: Install Pester
         shell: pwsh
         run: |
-          Invoke-Pester -Path tests/pester -CI
+          Install-Module Pester -Force -Scope CurrentUser
+      - name: Run PowerShell tests
+        shell: pwsh
+        run: |
+          Invoke-Pester -Path tests/powershell -CI -Output Detailed
