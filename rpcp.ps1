@@ -80,6 +80,7 @@ Param(
 
     [Parameter()]
     [AllowNull()]
+
     [hashtable]$Replacements,
 
     [Parameter()]
@@ -117,6 +118,7 @@ function Get-FilesToInclude {
         [string[]] $IgnoreFiles   = @(),
 
         [Parameter()]
+
         [ValidateRange(0, [long]::MaxValue)]
         [long]     $MaxFileSize
     )
@@ -136,6 +138,7 @@ function Get-FilesToInclude {
                     $reason = "matched ignore-folder '$pat'"
                     break
                 }
+
             }
         }
         # File name check
@@ -257,6 +260,7 @@ $filesToCopy = Get-FilesToInclude `
            -IgnoreFolders $if `
            -IgnoreFiles   $ifl `
            -MaxFileSize   $mf
+
 
 if ($filesToCopy.Count -eq 0) {
     Write-Warning 'No files passed the filters; nothing to copy.'

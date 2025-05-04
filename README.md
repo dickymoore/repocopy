@@ -171,6 +171,7 @@ Install-Module Pester -Force -Scope CurrentUser  # once
 Invoke-Pester -Path tests/powershell -Output Detailed
 ```
 
+
 ---
 
 ## 📄 License
