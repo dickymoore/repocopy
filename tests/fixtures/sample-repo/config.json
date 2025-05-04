@@ -1,0 +1,8 @@
+{
+  "repoPath": ".",
+  "maxFileSize": 204800,
+  "ignoreFolders": [ "build" ],
+  "ignoreFiles"  : [ "manifest.json", "*.png", "config.json" ],
+  "replacements" : { "ClientName": "Bob" },
+  "showCopiedFiles": false
+}
