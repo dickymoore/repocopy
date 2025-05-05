@@ -1,0 +1,10 @@
+# Normalise line endings for all shell-ish files (keeps Bats happy)
+*.sh   text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+
+# (Optional) keep CRLF for Windows-native scripts
+*.ps1  text eol=crlf
+
+# Fall-back: let Git auto-detect for everything else
+*      text=auto

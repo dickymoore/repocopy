@@ -2,29 +2,41 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
 
 jobs:
-  test-bash:
-    runs-on: ubuntu-latest
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
     steps:
-      - uses: actions/checkout@v3
-      - name: Install dependencies
-        run: sudo apt update && sudo apt install -y jq xclip bats
-      - name: Run Bash tests
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux test deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install -y bats jq xclip
+      - name: Run Bash test-suite (Bats)
+        if: runner.os == 'Linux'
         run: bats tests/bash/rpcp.bats
 
-  pester-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Pester
+      - name: Install Windows test deps
+        if: runner.os == 'Windows'
+        run: |
+          choco install bats --version=1.10.0 -y
+          choco install jq -y
+      - name: Run PowerShell test-suite (Pester)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Install-Module Pester -Force -Scope CurrentUser
-      - name: Run PowerShell tests
-        shell: pwsh
-        run: |
           Invoke-Pester -Path tests/powershell -CI -Output Detailed
