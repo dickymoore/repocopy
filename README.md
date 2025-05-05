@@ -1,6 +1,4 @@
-
 # repocopy (rpcp)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/dickymoore/repocopy)](https://github.com/dickymoore/repocopy/releases)
 [![CI](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml/badge.svg)](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml)
@@ -28,27 +26,51 @@ while letting you:
 
 ## 🚀 Quick‑start
 
+### PowerShell 7+ (Windows, macOS, Linux)
+
+```powershell
+# 1. Clone with submodules & jump in
+git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
+cd repocopy
+
+# 2. Add rpcp to your PATH (current session)
+$env:PATH += ';' + (Get-Location)
+
+# 3. Copy the *current* folder (default)
+rpcp
+
+# 4. Copy another repo, verbose
+rpcp -RepoPath 'C:\src\my-project' -Verbose
+```
+
+> **Clipboard helper** – uses the built‑in **Set‑Clipboard** cmdlet (no extra installs).
+
+---
+
+### Bash / Zsh (macOS, Linux, WSL)
+
 ```bash
-# clone with submodules & add rpcp to your PATH
+# 1. Clone with submodules & add rpcp to your PATH
 git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
 export PATH="$PATH:$(pwd)/repocopy"
 
-# copy the *current* folder (default)
+# 2. Copy the *current* folder (default)
 rpcp
 
-# copy another repo, verbosely
-rpcp --repo-path ~/src/my‑project --verbose
+# 3. Copy another repo, verbosely
+rpcp --repo-path ~/src/my-project --verbose
 ```
 
-> **Clipboard helpers**
->
-> * Linux: requires `xclip`     > * macOS: uses `pbcopy`     > * Windows / WSL: uses `clip.exe` or `powershell Set‑Clipboard`
+> **Clipboard helpers** –  
+> • Linux: requires `xclip`  
+> • macOS: uses `pbcopy`  
+> • WSL: uses `clip.exe`
 
 ---
 
 ## 📦 Requirements
 
-* **Bash** 4+ **or** **PowerShell** 7+
+* **Bash** 4+ **or** **PowerShell** 7+
 * `jq` – for the Bash version (auto‑installed if `autoInstallDeps = true`)
 * A clipboard tool (`pbcopy`, `xclip`, `clip.exe`, or `pwsh`)
 
