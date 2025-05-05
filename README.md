@@ -90,9 +90,9 @@ rpcp --repo-path ~/src/my-project --verbose
   // max bytes per file (0 = unlimited)
   "maxFileSize": 204800,
 
-  // string replacements applied to every file
+  // string replacements applied to every file (So in this case, ACME will be replaced with Company_name)
   "replacements": {
-    "ClientName": "ACME"
+    "ACME": "Company_name"
   },
 
   // print a summary afterwards?
