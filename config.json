@@ -3,7 +3,7 @@
     "maxFileSize": 204800,
     "ignoreFolders": [".git", ".github", ".terraform", "node_modules","plugin-cache", "terraform-provider*", "logo-drafts","build", ".archive","test_helper"],
     "ignoreFiles": ["manifest.json", "package-lock.json","*.png","*.jpg","*.jpeg","*.gif","*.svg","*.zip","*.tar.gz","*.tgz","*.tfstate", "*.tfstate.backup", "*.tfvars", "*.tfvars.json", "*.tfplan", "*.tfplan.json","*.avif","*.webp"],
-    "replacements": { "PARENT_COMPANY":"pca","Bob":"Redacted_name","PROJECT_ACRONYM":"wla" },
+    "replacements": { "ACME":"Company_name","Bob":"Redacted_name","Secret Project Name":"Redacted_project_name" },
     "showCopiedFiles": true,
     "autoInstallDeps": true
   }
