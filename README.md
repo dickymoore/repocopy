@@ -3,180 +3,168 @@
 [![Release](https://img.shields.io/github/v/release/dickymoore/repocopy)](https://github.com/dickymoore/repocopy/releases)
 [![CI](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml/badge.svg)](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml)
 
-### What is it?
-A lightweight utility to copy the file contents of a local directory to the clipboard.
-
-### Is that all it does?
-It has the ability to filter out files matched on name or type, or to redact text patterns.
-
-### But why?
-In case you've got sensitive information or huge irrelevant files in the repo
-
-### No, I mean why copy your repo at all?
-Various reasons, but it can be useful for when using using web-based tooling to help with development or debugging, such as when giving an LLM like ChatGPT the full context to a coding issue.
-
-### Why would I want to do that?
-I dunno mate. You might not. Go do something more fun.
+> **TL;DR** – `rpcp` is a one‑shot clipboard copier for *codebases*.
+> It walks a folder, excludes junk (`.git`, `node_modules`, binaries, etc.),
+> redacts secrets you define, then puts the result on your clipboard
+> ready to paste into an AI assistant or chat.
 
 ---
 
-## 🎯 Use Case
+## ✨ Why might I need this?
 
-When working with AI-assisted development ("vibe coding"), you often need to provide the AI with the exact context of your repository or a specific directory. With **repocopy**, you can quickly copy all relevant files (excluding things like `.git`, `node_modules`, large binaries, etc.) into your clipboard in one shot. Then just paste that into your AI tool to give it full awareness of your codebase structure and content.
+Sometimes you’re pair‑programming with an LLM (ChatGPT, Claude, Copilot Chat etc.)
+and you need to give it your *entire* repo or a large sub‑directory for context.
+Copy‑pasting file‑by‑file gets old fast – **repocopy** does it in a single command
+while letting you:
 
----
-
-## 🚀 Features
-
-- **Config-driven**: Exclude folders, files, set max file size, and define token replacements via `config.json`.
-- **One-command operation**: Clone the repo, add the script directory to your `PATH`, then run `rpcp` to copy contents of the current folder.
-- **Automatic replacements**: Swap tokens (e.g. `PARENT_COMPANY`, `CLIENT_NAME`) as defined in your config.
-- **Verbose mode**: See exactly which files were included or excluded and why.
-- **Show summary**: Optionally list which files got copied, either via CLI or config.
-- **Cross-platform support**: Run on Windows PowerShell or macOS/Linux Bash.
+* redact sensitive tokens (`ACME` → `ClientName`)
+* skip whole directories or globs
+* honour a max file‑size
+* view exactly which files were included
 
 ---
 
-## 📦 Installation
+## 🚀 Quick‑start
 
-1. **Clone the repocopy repository**
+### PowerShell 7+ (Windows, macOS, Linux)
 
-   ```bash
-   git clone https://github.com/<your-org>/repocopy.git
-   ```
+```powershell
+# 1. Clone with submodules & jump in
+git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
+cd repocopy
 
-2. **Add to your PATH**
+# 2. Add rpcp to your PATH (current session)
+$env:PATH += ';' + (Get-Location)
 
-   - **Windows (PowerShell)**:
-     1. Locate the folder where you cloned `repocopy` (e.g. `C:\tools\repocopy`).
-     2. Open System Settings → Environment Variables → User Variables → `Path` → Edit → New.
-     3. Paste the full path to your `repocopy` folder and click OK.
-     4. Restart your PowerShell session.
+# 3. Copy the *current* folder (default)
+rpcp
 
-   - **macOS/Linux (Bash)**:
-     1. Ensure you have [PowerShell Core](https://github.com/PowerShell/PowerShell) or use the Bash script directly.
-     2. Add the folder to your `PATH`: 
-        ```bash
-        export PATH="$PATH:/path/to/repocopy"
-        ```
-     3. Add that line to your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`).
+# 4. Copy another repo, verbose
+rpcp -RepoPath 'C:\src\my-project' -Verbose
+```
 
-3. **Optionally create an alias**
+> **Clipboard helper** – uses the built‑in **Set‑Clipboard** cmdlet (no extra installs).
 
-   - **PowerShell** (in your PowerShell profile):
-     ```powershell
-     Set-Alias rpcp "$(Join-Path 'C:\tools\repocopy' 'rpcp.ps1')"
-     ```
-   - **Bash** (in your shell profile):
-     ```bash
-     alias rpcp='repocopy.sh'
-     ```
+---
 
-Now you can run:
+### Bash / Zsh (macOS, Linux, WSL)
 
 ```bash
+# 1. Clone with submodules & add rpcp to your PATH
+git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
+export PATH="$PATH:$(pwd)/repocopy"
+
+# 2. Copy the *current* folder (default)
 rpcp
+
+# 3. Copy another repo, verbosely
+rpcp --repo-path ~/src/my-project --verbose
 ```
+
+> **Clipboard helpers** –  
+> • Linux: requires `xclip`  
+> • macOS: uses `pbcopy`  
+> • WSL: uses `clip.exe`
+
+---
+
+## 📦 Requirements
+
+* **Bash** 4+ **or** **PowerShell** 7+
+* `jq` – for the Bash version (auto‑installed if `autoInstallDeps = true`)
+* A clipboard tool (`pbcopy`, `xclip`, `clip.exe`, or `pwsh`)
 
 ---
 
 ## ⚙️ Configuration (`config.json`)
 
-Place a `config.json` alongside `rpcp.ps1` or `repocopy.sh`. Example:
-
-```json
+```jsonc
 {
+  // folder to scan – “.” = working directory
   "repoPath": ".",
+
+  // ignore folders / files (globs ok)
+  "ignoreFolders": ["build", ".git", "node_modules"],
+  "ignoreFiles":   ["manifest.json", "*.png"],
+
+  // max bytes per file (0 = unlimited)
   "maxFileSize": 204800,
-  "ignoreFolders": [
-    ".git", ".github", ".terraform", "node_modules",
-    "plugin-cache", "terraform-provider*", "logo-drafts",
-    "build", ".archive"
-  ],
-  "ignoreFiles": [
-    "manifest.json", "package-lock.json"
-  ],
+
+  // string replacements applied to every file
   "replacements": {
-    "PARENT_COMPANY": "pca",
-    "CLIENT_NAME": "ClientName",
-    "PROJECT_ACRONYM": "wla"
+    "ClientName": "ACME"
   },
-  "showCopiedFiles": true
+
+  // print a summary afterwards?
+  "showCopiedFiles": true,
+
+  // let rpcp.sh auto‑install jq if missing
+  "autoInstallDeps": true
 }
 ```
 
-- **repoPath**: Default folder to scan (`.` = current directory).
-- **maxFileSize**: Max bytes per file (0 = no limit).
-- **ignoreFolders**: Wildcard patterns of folder names to skip.
-- **ignoreFiles**: Exact file names to skip.
-- **replacements**: Key/value pairs to replace in file contents.
-- **showCopiedFiles**: `true` to list included files after copying.
+Every CLI switch overrides the matching JSON field – handy when you just
+need to bump `--max-file-size` for one run.
 
 ---
 
-## 💻 Usage
+## 💻 Usage snippets
 
-### PowerShell (Windows or Core)
+### PowerShell
 
 ```powershell
-# Copy current directory
+# basic
 rpcp
 
-# Override max size, suppress summary:
-rpcp -MaxFileSize 0 -ShowCopiedFiles:$false
+# disable size filter
+rpcp -MaxFileSize 0
 
-# Scan a different directory:
-rpcp -RepoPath 'C:\Projects\MyApp'
-
-# Verbose debugging:
-rpcp -Verbose
+# different folder, quiet output
+rpcp -RepoPath C:\Code\Foo -Verbose:$false
 ```
 
-### Bash (macOS/Linux)
+### Bash
 
 ```bash
-# Copy current directory
+# basic
 rpcp
 
-# Override max size, suppress summary:
-repocopy.sh --max-file-size 0 --show-copied-files=false
+# disable size filter & summary
+rpcp --max-file-size 0 --show-copied-files=false
 
-# Scan a different directory:
-repocopy.sh --repo-path /path/to/project
-
-# Verbose debugging:
-repocopy.sh --verbose
+# different folder
+rpcp --repo-path ~/Code/Foo
 ```
 
 ---
 
-## 🎯 Vibe Coding
+## 🧪 Running tests locally
 
-After running `rpcp`, your clipboard contains all relevant files with context. Paste directly into your AI tool (ChatGPT, Copilot Chat, etc.) to provide the full structure and content, no manual file hunting required.
+```bash
+# one‑time: fetch the helper submodules
+git submodule update --init --recursive
+
+# Bash tests
+sudo apt install bats jq xclip   # linux example
+bats tests/bash
+
+# PowerShell tests
+pwsh -Command 'Install-Module Pester -Scope CurrentUser -Force'
+pwsh -Command 'Invoke-Pester tests/powershell'
+```
 
 ---
 
-## 🧪 Testing & Linting
+## 📝 Development notes
 
-# Running tests locally
-
-## Bash (Bats)
-
-```bash
-sudo apt install bats jq xclip   # or the equivalent for your OS
-bats tests/bash/repocopy.bats
-```
-
-## PowerShell (Pester)
-
-```
-Install-Module Pester -Force -Scope CurrentUser  # once
-Invoke-Pester -Path tests/powershell -Output Detailed
-```
-
+* Shell files are expected to use **LF** endings.  
+  A `.gitattributes` is provided so Windows Git converts on checkout.
+* CI runs both Pester (PowerShell) and Bats (Bash) on
+  **ubuntu‑latest** and **windows‑latest** runners.
+* Want to contribute? See **CONTRIBUTING.md**.
 
 ---
 
 ## 📄 License
 
-MIT License · © 2025 Your Name
+MIT © 2025 Dicky Moore
