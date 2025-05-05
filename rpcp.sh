@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# repocopy.sh — Copy filtered parts of a repo to the clipboard according to config.json
+# rpcp.sh — Copy filtered parts of a repo to the clipboard according to config.json
 #
 # Dependencies:
 #   - jq (for JSON parsing)
 #   - pbcopy (macOS), xclip (Linux), clip.exe or powershell.exe (WSL) for clipboard
 #
 # Usage:
-#   repocopy.sh [--repo-path path] [--config-file file]
+#   rpcp.sh [--repo-path path] [--config-file file]
 #               [--max-file-size bytes] [--ignore-folders pat1,pat2]
 #               [--ignore-files f1,f2] [--replacements '{"T":"v",...}']
 #               [--show-copied-files] [--verbose]
 #
 # Example:
-#   repocopy.sh --verbose
+#   rpcp.sh --verbose
 #
 
 set -euo pipefail

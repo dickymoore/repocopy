@@ -3,20 +3,20 @@
 [![Release](https://img.shields.io/github/v/release/dickymoore/repocopy)](https://github.com/dickymoore/repocopy/releases)
 [![CI](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml/badge.svg)](https://github.com/dickymoore/repocopy/actions/workflows/ci.yml)
 
-### What is it?
+📎 What is it?
 A lightweight utility to copy the file contents of a local directory to the clipboard.
 
-### Is that all it does?
+🤔 Is that all it does?
 It has the ability to filter out files matched on name or type, or to redact text patterns.
 
-### But why?
-In case you've got sensitive information or huge irrelevant files in the repo
+❓ But why?
+In case you've got sensitive information or huge irrelevant files in the repo.
 
-### No, I mean why copy your repo at all?
-Various reasons, but it can be useful for when using using web-based tooling to help with development or debugging, such as when giving an LLM like ChatGPT the full context to a coding issue.
+🧠 No, I mean why copy your repo at all?
+Various reasons, but it can be useful for when using web-based tooling to help with development or debugging — such as giving an LLM like ChatGPT the full context to a coding issue.
 
-### Why would I want to do that?
-I dunno mate. You might not. Go do something more fun.
+😐 Why would I want to do that?
+I dunno mate. You might not, in which case, go enjoy yourself.
 
 ---
 
@@ -42,7 +42,8 @@ When working with AI-assisted development ("vibe coding"), you often need to pro
 1. **Clone the repocopy repository**
 
    ```bash
-   git clone https://github.com/<your-org>/repocopy.git
+   git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
+   git submodule update --init --recursive
    ```
 
 2. **Add to your PATH**
@@ -69,7 +70,7 @@ When working with AI-assisted development ("vibe coding"), you often need to pro
      ```
    - **Bash** (in your shell profile):
      ```bash
-     alias rpcp='repocopy.sh'
+     alias rpcp='rpcp.sh'
      ```
 
 Now you can run:
@@ -82,7 +83,7 @@ rpcp
 
 ## ⚙️ Configuration (`config.json`)
 
-Place a `config.json` alongside `rpcp.ps1` or `repocopy.sh`. Example:
+Place a `config.json` alongside `rpcp.ps1` or `rpcp.sh`. Example:
 
 ```json
 {
@@ -139,20 +140,20 @@ rpcp -Verbose
 rpcp
 
 # Override max size, suppress summary:
-repocopy.sh --max-file-size 0 --show-copied-files=false
+rpcp.sh --max-file-size 0 --show-copied-files=false
 
 # Scan a different directory:
-repocopy.sh --repo-path /path/to/project
+rpcp.sh --repo-path /path/to/project
 
 # Verbose debugging:
-repocopy.sh --verbose
+rpcp.sh --verbose
 ```
 
 ---
 
 ## 🎯 Vibe Coding
 
-After running `rpcp`, your clipboard contains all relevant files with context. Paste directly into your AI tool (ChatGPT, Copilot Chat, etc.) to provide the full structure and content, no manual file hunting required.
+After running `rpcp`, your clipboard contains all relevant files with context. Paste directly into your AI tool to provide the full structure and content, no manual file hunting required.
 
 ---
 
@@ -179,4 +180,4 @@ Invoke-Pester -Path tests/powershell -Output Detailed
 
 ## 📄 License
 
-MIT License · © 2025 Your Name
+MIT License · © 2025 Dicky Moore
