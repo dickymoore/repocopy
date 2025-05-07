@@ -33,8 +33,10 @@ while letting you:
 git clone --recurse-submodules https://github.com/dickymoore/repocopy.git
 cd repocopy
 
-# 2. Add rpcp to your PATH (current session)
-$env:PATH += ';' + (Get-Location)
+# 2. Add rpcp to your PATH
+$env:PATH += ';' + (Get-Location) # (current session)
+
+if ($([Environment]::GetEnvironmentVariable('PATH','User')) -split ';' -notcontains $((Get-Location).Path)) {[Environment]::SetEnvironmentVariable('PATH',"$([Environment]::GetEnvironmentVariable('PATH','User'));$((Get-Location).Path)",'User')} # (future sessions)
 
 # 3. Copy the *current* folder (default)
 rpcp
