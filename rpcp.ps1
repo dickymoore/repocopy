@@ -57,127 +57,73 @@ function Get-DefaultConfig {
 
 function Get-ConfigFile {
     param (
-        [Parameter(Mandatory=$true)][string]$RepoPath,
-        [Parameter(Mandatory=$false)][string]$ConfigFile = ""
+        [string]$RepoPath,
+        [string]$ConfigFile = ""
     )
-    
-    # If config file is specified, use it
-    if ($ConfigFile -ne "" -and (Test-Path $ConfigFile)) {
-        return $ConfigFile
+    if ($ConfigFile -and (Test-Path $ConfigFile)) { return $ConfigFile }
+    $candidates = "repocopy.json", ".repocopy.json", "repocopy.config.json", "config.json"
+    foreach ($c in $candidates) {
+        $path = Join-Path $RepoPath $c
+        if (Test-Path $path) { return $path }
     }
-    
-    # Try to find config file in repo path
-    $defaultConfigs = @(
-        "repocopy.json",
-        ".repocopy.json",
-        "repocopy.config.json",
-        "config.json"
-    )
-    
-    foreach ($config in $defaultConfigs) {
-        $configPath = Join-Path $RepoPath $config
-        if (Test-Path $configPath) {
-            return $configPath
-        }
-    }
-    
-    # No config file found
     return $null
 }
 
 function Read-ConfigFile {
-    param (
-        [Parameter(Mandatory=$true)][string]$ConfigFilePath
-    )
-    
+    param ([string]$ConfigFilePath)
     try {
-        $configContent = Get-Content -Raw -Path $ConfigFilePath | ConvertFrom-Json
-        
-        # Convert to hashtable for easier manipulation
+        $json = Get-Content -Raw $ConfigFilePath | ConvertFrom-Json
         $config = @{}
-        $configContent.PSObject.Properties | ForEach-Object {
-            if ($_.Name -eq "replacements") {
-                # Handle replacements object specially
-                $replacements = @{}
-                if ($null -ne $_.Value) {
-                    $_.Value.PSObject.Properties | ForEach-Object {
-                        $replacements[$_.Name] = $_.Value
-                    }
-                }
-                $config[$_.Name] = $replacements
+        foreach ($p in $json.PSObject.Properties) {
+            if ($p.Name -eq "replacements") {
+                $h = @{}
+                foreach ($r in $p.Value.PSObject.Properties) { $h[$r.Name] = $r.Value }
+                $config[$p.Name] = $h
             } else {
-                $config[$_.Name] = $_.Value
+                $config[$p.Name] = $p.Value
             }
         }
-        
         return $config
     } catch {
-        Write-Error "Failed to read config file: $_"
-        exit 1
+        Write-Error "Failed to read config: $_"; exit 1
     }
 }
 
 function Get-FilesToInclude {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)] [string]   $RepoPath,
-        [Parameter(Mandatory=$true)] [int]      $MaxFileSize,
-        [Parameter(Mandatory=$true)] [string[]] $IgnoreFolders,
-        [Parameter(Mandatory=$true)] [string[]] $IgnoreFiles,
-        [Parameter(Mandatory=$false)][string]   $FileListPath,
-        [Parameter(Mandatory=$false)][string]   $SelectionMode = "scan"
+        [string]$RepoPath,
+        [int]$MaxFileSize,
+        [string[]]$IgnoreFolders,
+        [string[]]$IgnoreFiles,
+        [string]$FileListPath,
+        [string]$SelectionMode = "scan"
     )
-    
-    $files = @()
-    $fileList = @()
-    
-    # Check if we need to process a file list
-    if ($SelectionMode -in @("filelist", "scanlist", "listfilter") -and (![string]::IsNullOrEmpty($FileListPath))) {
+    $files = @(); $fileList = @()
+    if ($SelectionMode -in @("filelist","scanlist","listfilter") -and $FileListPath) {
         if (Test-Path $FileListPath) {
-            # Extract file paths from the file list
-            $content = Get-Content -Path $FileListPath -Raw
-            
-            # Extract file paths - one per line
-            $fileList = $content -split "\r?\n" | 
-                        Where-Object { $_ -match '\S' -and -not $_.StartsWith('#') } |  # Non-empty, non-comment lines
+            $fileList = (Get-Content -Raw $FileListPath) -split "\r?\n" |
+                        Where { $_.Trim() -and -not $_.Trim().StartsWith('#') } |
                         ForEach-Object { $_.Trim() }
-            
-            # Add the file list path itself to the ignoreFiles list to prevent it from being included
-            $IgnoreFiles += $(Split-Path -Leaf $FileListPath)
+            $IgnoreFiles += Split-Path $FileListPath -Leaf
         } else {
-            Write-Warning "FileListPath '$FileListPath' not found. Defaulting to scan mode."
+            Write-Warning "FileListPath '$FileListPath' not found; defaulting to scan"
             $SelectionMode = "scan"
         }
     }
-    
-    # For filelist mode, we only process files in the list
     if ($SelectionMode -eq "filelist") {
-        foreach ($relativePath in $fileList) {
-            $fullPath = Join-Path $RepoPath $relativePath
-            
-            if (Test-Path $fullPath -PathType Leaf) {
-                $fileInfo = [System.IO.FileInfo]::new($fullPath)
-                
-                # Apply size filter for consistency (skip size filter if MaxFileSize is 0)
-                if ($MaxFileSize -eq 0) {
-                } else {
-                    if ($MaxFileSize -le 0 -or $fileInfo.Length -le $MaxFileSize) {
-                        $files += @{
-                            Path = $fullPath
-                            RelativePath = $relativePath
-                        }
-                    } else {
-                        Write-Verbose "Skipping file exceeding size limit: $relativePath"
-                    }
-
-                }                
-            } else {
-                Write-Verbose "File from list not found: $relativePath"
+        foreach ($rel in $fileList) {
+            $full = Join-Path $RepoPath $rel
+            if (Test-Path $full -PathType Leaf) {
+                $info = Get-Item $full
+                if ($MaxFileSize -le 0 -or $info.Length -le $MaxFileSize) {
+                    $files += @{ Path = $info.FullName; RelativePath = $rel }
+                }
             }
         }
-        
         return $files
     }
+
     
     # For other modes, we need to scan the repository
     $allFiles = Get-ChildItem -Path $RepoPath -Recurse -File | 
