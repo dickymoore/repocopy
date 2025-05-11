@@ -31,7 +31,7 @@ setup() {
   printf 'build artifact\n' >"$TMP_REPO/build/output.txt"
 
   # Create the fileListPath document
-  cat >"$TMP_REPO/affected.md" <<'MARKDOWN'
+  cat >"$TMP_REPO/include.md" <<'MARKDOWN'
 ### Files to include
 
 src/include-dir/file1.txt
@@ -50,7 +50,7 @@ MARKDOWN
   "showCopiedFiles": false,
   "autoInstallDeps": false,
   "selectionMode": "scan",
-  "fileListPath": "affected.md"
+  "fileListPath": "include.md"
 }
 JSON
 

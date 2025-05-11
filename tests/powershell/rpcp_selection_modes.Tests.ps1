@@ -42,7 +42,7 @@ Describe 'rpcp.ps1 selectionMode behavior (fixture repo)' {
 src/include-dir/file1.txt
 manifest.json
 build/output.txt
-'@ | Set-Content "$TestRepo/affected.md"
+'@ | Set-Content "$TestRepo/include.md"
         
         # Create base config.json
         @'
@@ -54,7 +54,7 @@ build/output.txt
   "replacements": { "ClientName": "Redacted_name" },
   "showCopiedFiles": false,
   "selectionMode": "scan",
-  "fileListPath": "affected.md"
+  "fileListPath": "include.md"
 }
 '@ | Set-Content "$TestRepo/config.json"
 

@@ -40,14 +40,11 @@ Describe 'rpcp.ps1 end-to-end behaviour (fixture repo)' {
   "showCopiedFiles": false
 }
 '@ | Set-Content "$FixtureRoot/config.json"
-        # -- extra files for later tests -----------------------------------
-        if (-not (Test-Path "$FixtureRoot/src/big.bin")) {
-            $size  = 300kb            # 300 KiB  >  maxFileSize
-            $bytes = New-Object byte[] $size
-            [System.Random]::new().NextBytes($bytes)
-            [IO.File]::WriteAllBytes("$FixtureRoot/src/big.bin", $bytes)
-        }
-
+        # -- create a file that should be excluded by size -----------------
+        $size  = 300kb            # 300 KiB  >  maxFileSize
+        $bytes = New-Object byte[] $size
+        [System.Random]::new().NextBytes($bytes)
+        [IO.File]::WriteAllBytes("$FixtureRoot/src/big.bin", $bytes)
         if (-not (Test-Path "$FixtureRoot/build")) {
             New-Item -ItemType Directory -Path "$FixtureRoot/build" | Out-Null
             'ignore me' | Set-Content "$FixtureRoot/build/output.txt"
@@ -109,13 +106,12 @@ function Invoke-Rpcp {
             $copied | Should -Not -Match 'big\.bin'
         }
 
-        It 'includes big file when CLI overrides maxFileSize' {
+        It 'includes big file maxFileSize Is set to 0' {
             $copied = Invoke-Rpcp -Param @{
                 RepoPath    = $FixtureRoot
                 ConfigFile  = "$FixtureRoot/config.json"
-                MaxFileSize = 0          # disable size filtering
+                MaxFileSize = 0
             }
-
             $copied | Should -Match 'big\.bin'
         }
     }

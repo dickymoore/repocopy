@@ -6,6 +6,6 @@
     "replacements": { "ACME":"Company_name","Bob":"Redacted_name","Secret Project Name":"Redacted_project_name" },
     "showCopiedFiles": true,
     "autoInstallDeps": true,
-    "selectionMode": "scan",
+    "selectionMode": "filelist",
     "fileListPath":  "include.md"
   }

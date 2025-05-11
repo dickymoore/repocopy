@@ -1,381 +1,494 @@
-<#
-.SYNOPSIS
-   Copy filtered parts of a repo to the clipboard according to config.json.
-
-.DESCRIPTION
-   Loads configuration from a JSON file (by default in the same folder as the script),
-   enumerates all files under the target folder, excludes or includes based on:
-     • ignoreFolders (wildcards OK)
-     • ignoreFiles (exact names)
-     • maxFileSize (bytes, 0 = no limit)
-   Always applies token replacements from the config. Copies the final concatenated
-   content to the clipboard. Command-line parameters can override any config value,
-   and a JSON setting “showCopiedFiles” will automatically list the files copied
-   unless overridden on the CLI.
-
-.PARAMETER RepoPath
-   Path of the repository to scan. Defaults to the current directory.
-   Must be an existing folder.
-
-.PARAMETER ConfigFile
-   Path to the JSON configuration file. Defaults to "config.json" in the script’s folder.
-   Must be an existing file.
-
-.PARAMETER MaxFileSize
-   Maximum file size in bytes to include; set to 0 to disable size filtering.
-   Overrides the value in the config file if specified.
-
-.PARAMETER IgnoreFolders
-   Array of folder name patterns to ignore (supports wildcards).
-   Overrides the config file’s ignoreFolders when specified.
-
-.PARAMETER IgnoreFiles
-   Array of file names to ignore (exact matches).
-   Overrides the config file’s ignoreFiles when specified.
-
-.PARAMETER Replacements
-   Hashtable of token → replacement pairs.
-   Overrides the config file’s replacements when specified.
-
-.PARAMETER ShowCopiedFiles
-   If specified (or if “showCopiedFiles” is true in config.json), after copying
-   to clipboard the script will list every file that was included.
-
-.PARAMETER Verbose
-   Standard PowerShell -Verbose switch. When used, logs every file’s include/exclude
-   decision and the reason.
-
-.EXAMPLE
-   .\rpcp.ps1
-   # Uses config.json, applies its settings.
-
-.EXAMPLE
-   .\rpcp.ps1 -MaxFileSize 0 -ShowCopiedFiles:$false
-   # Disables size filtering; suppresses the copied-file list.
-
-.EXAMPLE
-   .\rpcp.ps1 -RepoPath 'C:\MyProject' -ConfigFile '.\myconfig.json'
-#>
+#!/usr/bin/env pwsh
+# ───────────────────────────────────────────────────────────────────────
+# RePoCoPy - Repository Copy Tool (PowerShell Edition)
+# Copies files from a repo to clipboard while respecting ignore patterns
+# and performing text replacements for sensitive data.
+# ───────────────────────────────────────────────────────────────────────
 [CmdletBinding()]
-Param(
-    [Parameter()]
-    [ValidateScript({ Test-Path $_ -PathType Container })]
-    [string]   $RepoPath = '.',
-
-    [Parameter()]
-    [ValidateScript({ Test-Path $_ -PathType Leaf })]
-    [string]   $ConfigFile,
-
-    [Parameter()]
-    [ValidateSet('scan', 'filelist', 'scanlist', 'listfilter')]
-    [string]   $SelectionMode = "scan",
-
-    [Parameter()]
-    [string]   $FileListPath = "include.md",
-
-    [Parameter()]
-    [ValidateRange(0, [long]::MaxValue)]
-    [long]     $MaxFileSize,
-
-    [Parameter()]
-    [AllowNull()]
-    [string[]] $IgnoreFolders,
-
-    [Parameter()]
-    [AllowNull()]
-    [string[]] $IgnoreFiles,
-
-    [Parameter()]
-    [AllowNull()]
-
-    [hashtable]$Replacements,
-
-    [Parameter()]
-    [switch]  $ShowCopiedFiles
+param(
+    [Parameter(Mandatory = $false)]
+    [string]$RepoPath = ".",
+    
+    [Parameter(Mandatory = $false)]
+    [string]$ConfigFile = "",
+    
+    [Parameter(Mandatory = $false)]
+    [int]$MaxFileSize = 0, # 0 means disable max file size filtering
+    
+    [Parameter(Mandatory = $false)]
+    [switch]$ShowCopiedFiles = $false,
+    
+    [Parameter(Mandatory = $false)]
+    [string]$FileListPath = "",
+    
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("scan", "filelist", "scanlist", "listfilter")]
+    [string]$SelectionMode = ""
 )
 
-function Get-Config {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory)]
-        [ValidateScript({ Test-Path $_ -PathType Leaf })]
-        [string] $ConfigFilePath
-    )
-    try {
-        $text = Get-Content -Raw -Path $ConfigFilePath -ErrorAction Stop
-        return $text | ConvertFrom-Json -ErrorAction Stop
-    } catch {
-        Write-Error "Failed to load config from '$ConfigFilePath': $_" -ErrorAction Stop
+# Ensure we stop on all errors
+$ErrorActionPreference = 'Stop'
+
+# ───────────────────────────────────────────────────────────────────────
+# Support Functions
+# ───────────────────────────────────────────────────────────────────────
+function Get-DefaultConfig {
+    return @{
+        repoPath = "."
+        maxFileSize = 1MB  # Default 1MB file size limit
+        ignoreFolders = @(
+            "node_modules",
+            ".git",
+            ".idea",
+            ".vscode"
+        )
+        ignoreFiles = @(
+            "*.log",
+            "*.tmp",
+            "package-lock.json",
+            "yarn.lock"
+        )
+        replacements = @{}
+        showCopiedFiles = $false
+        selectionMode = "scan"
+        fileListPath = ""
     }
 }
-function Get-FileListFromPath {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory)]
-        [string] $Path
+
+function Get-ConfigFile {
+    param (
+        [Parameter(Mandatory=$true)][string]$RepoPath,
+        [Parameter(Mandatory=$false)][string]$ConfigFile = ""
     )
     
-    if (-not (Test-Path $Path -PathType Leaf)) {
-        Write-Warning "File list path '$Path' not found."
-        return @()
+    # If config file is specified, use it
+    if ($ConfigFile -ne "" -and (Test-Path $ConfigFile)) {
+        return $ConfigFile
     }
     
-    $content = Get-Content -Path $Path
-    $files = @()
+    # Try to find config file in repo path
+    $defaultConfigs = @(
+        "repocopy.json",
+        ".repocopy.json",
+        "repocopy.config.json",
+        "config.json"
+    )
     
-    foreach ($line in $content) {
-        # Skip empty lines and lines starting with #, >, or -
-        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^\s*[#>-]') {
+    foreach ($config in $defaultConfigs) {
+        $configPath = Join-Path $RepoPath $config
+        if (Test-Path $configPath) {
+            return $configPath
+        }
+    }
+    
+    # No config file found
+    return $null
+}
+
+function Read-ConfigFile {
+    param (
+        [Parameter(Mandatory=$true)][string]$ConfigFilePath
+    )
+    
+    try {
+        $configContent = Get-Content -Raw -Path $ConfigFilePath | ConvertFrom-Json
+        
+        # Convert to hashtable for easier manipulation
+        $config = @{}
+        $configContent.PSObject.Properties | ForEach-Object {
+            if ($_.Name -eq "replacements") {
+                # Handle replacements object specially
+                $replacements = @{}
+                if ($null -ne $_.Value) {
+                    $_.Value.PSObject.Properties | ForEach-Object {
+                        $replacements[$_.Name] = $_.Value
+                    }
+                }
+                $config[$_.Name] = $replacements
+            } else {
+                $config[$_.Name] = $_.Value
+            }
+        }
+        
+        return $config
+    } catch {
+        Write-Error "Failed to read config file: $_"
+        exit 1
+    }
+}
+
+function Get-FilesToInclude {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)] [string]   $RepoPath,
+        [Parameter(Mandatory=$true)] [int]      $MaxFileSize,
+        [Parameter(Mandatory=$true)] [string[]] $IgnoreFolders,
+        [Parameter(Mandatory=$true)] [string[]] $IgnoreFiles,
+        [Parameter(Mandatory=$false)][string]   $FileListPath,
+        [Parameter(Mandatory=$false)][string]   $SelectionMode = "scan"
+    )
+    
+    $files = @()
+    $fileList = @()
+    
+    # Check if we need to process a file list
+    if ($SelectionMode -in @("filelist", "scanlist", "listfilter") -and (![string]::IsNullOrEmpty($FileListPath))) {
+        if (Test-Path $FileListPath) {
+            # Extract file paths from the file list
+            $content = Get-Content -Path $FileListPath -Raw
+            
+            # Extract file paths - one per line
+            $fileList = $content -split "\r?\n" | 
+                        Where-Object { $_ -match '\S' -and -not $_.StartsWith('#') } |  # Non-empty, non-comment lines
+                        ForEach-Object { $_.Trim() }
+            
+            # Add the file list path itself to the ignoreFiles list to prevent it from being included
+            $IgnoreFiles += $(Split-Path -Leaf $FileListPath)
+        } else {
+            Write-Warning "FileListPath '$FileListPath' not found. Defaulting to scan mode."
+            $SelectionMode = "scan"
+        }
+    }
+    
+    # For filelist mode, we only process files in the list
+    if ($SelectionMode -eq "filelist") {
+        foreach ($relativePath in $fileList) {
+            $fullPath = Join-Path $RepoPath $relativePath
+            
+            if (Test-Path $fullPath -PathType Leaf) {
+                $fileInfo = [System.IO.FileInfo]::new($fullPath)
+                
+                # Apply size filter for consistency (skip size filter if MaxFileSize is 0)
+                if ($MaxFileSize -eq 0) {
+                } else {
+                    if ($MaxFileSize -le 0 -or $fileInfo.Length -le $MaxFileSize) {
+                        $files += @{
+                            Path = $fullPath
+                            RelativePath = $relativePath
+                        }
+                    } else {
+                        Write-Verbose "Skipping file exceeding size limit: $relativePath"
+                    }
+
+                }                
+            } else {
+                Write-Verbose "File from list not found: $relativePath"
+            }
+        }
+        
+        return $files
+    }
+    
+    # For other modes, we need to scan the repository
+    $allFiles = Get-ChildItem -Path $RepoPath -Recurse -File | 
+                Where-Object { 
+                    # Filter out files in ignored folders
+                    $folderMatch = $false
+                    foreach ($folder in $IgnoreFolders) {
+                        # Ensure $_.FullName is never null
+                        if ($null -ne $_ -and $null -ne $_.FullName) {
+                            # Normalize path separators to forward slashes for consistent matching
+                            $normalizedPath = $_.FullName.Replace('\', '/')
+                            
+                            # Look for the folder pattern surrounded by slashes or at start/end
+                            if ($normalizedPath -match "(^|/)$([regex]::Escape($folder))(/|$)") {
+                                $folderMatch = $true
+                                break
+                            }
+                        }
+                    }
+                    
+                    if ($folderMatch) {
+                        return $false
+                    }
+                    
+                    # Continue with file filtering
+                    $fileMatch = $false
+                    foreach ($pattern in $IgnoreFiles) {
+                        if ($_.Name -like $pattern) {
+                            $fileMatch = $true
+                            break
+                        }
+                    }
+                    
+                    # Keep files that don't match ignore patterns
+                    return -not $fileMatch
+                }
+    
+    # Process scanned files
+    $scanFiles = @()
+    foreach ($file in $allFiles) {
+        # Ensure we have a valid path before doing string operations
+        if ($null -eq $file -or [string]::IsNullOrEmpty($file.FullName)) {
+            Write-Warning "Skipping invalid file entry"
             continue
         }
         
-        # Extract file paths (look for things that look like paths)
-        if ($line -match '[\w\d\._-]+[\\/][\w\d\._-]+') {
-            $match = $Matches[0]
-            # Normalize path separators
-            $normalizedPath = $match.Replace('\', [IO.Path]::DirectorySeparatorChar).Replace('/', [IO.Path]::DirectorySeparatorChar)
-            $files += $normalizedPath
+        # Get the relative path - handle potential path issues safely
+        try {
+            # Ensure both paths are fully qualified and normalized
+            $fullRepoPath = [System.IO.Path]::GetFullPath($RepoPath)
+            $fullFilePath = [System.IO.Path]::GetFullPath($file.FullName)
+            
+            # Ensure fullRepoPath ends with a directory separator
+            if (-not $fullRepoPath.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+                $fullRepoPath = $fullRepoPath + [System.IO.Path]::DirectorySeparatorChar
+            }
+            
+            # Check that the file path starts with the repo path
+            if ($fullFilePath.StartsWith($fullRepoPath, [StringComparison]::OrdinalIgnoreCase)) {
+                # Get the relative path by removing the repo path prefix
+                $relativePath = $fullFilePath.Substring($fullRepoPath.Length)
+                
+                # Convert backslashes to forward slashes for consistency
+                $relativePath = $relativePath.Replace('\', '/')
+                
+                # Apply size filter
+                if ($MaxFileSize -le 0 -or $file.Length -le $MaxFileSize) {
+                    $scanFiles += @{
+                        Path = $file.FullName
+                        RelativePath = $relativePath
+                    }
+                } else {
+                    Write-Verbose "Skipping file exceeding size limit: $relativePath"
+                }
+            } else {
+                Write-Warning "File path is not within repository path: $($file.FullName)"
+            }
+        } catch {
+            Write-Warning "Error processing file path '$($file.FullName)': $_"
+            continue
         }
+    }
+    
+    # Now process files based on selection mode
+    switch ($SelectionMode) {
+        "scan" {
+            # For scan mode, use all filtered files
+            $files = $scanFiles
+        }
+        "scanlist" {
+            # For scanlist mode, add files from scan
+            $files = $scanFiles
+            
+            # Also add files from the list even if they didn't pass the scan
+            foreach ($listPath in $fileList) {
+                # Skip if this file is already included from scan
+                if (($scanFiles | Where-Object { $_.RelativePath -eq $listPath }).Count -gt 0) {
+                    continue
+                }
+                
+                $listFullPath = Join-Path $RepoPath $listPath
+                if (Test-Path $listFullPath -PathType Leaf) {
+                    $listFileInfo = [System.IO.FileInfo]::new($listFullPath)
+                    if ($MaxFileSize -le 0 -or $listFileInfo.Length -le $MaxFileSize) {
+                        $files += @{
+                            Path = $listFullPath
+                            RelativePath = $listPath
+                        }
+                    }
+                }
+            }
+        }
+        "listfilter" {
+            # For listfilter mode, only add files that are both in the list and pass filters
+            $files = @()
+            foreach ($scanFile in $scanFiles) {
+                if ($fileList -contains $scanFile.RelativePath) {
+                    $files += $scanFile
+                }
+            }
+        }
+    }
+    
+    # Return unique files by RelativePath (might have duplicates from scanlist)
+    if ($SelectionMode -eq "scanlist") {
+        $uniqueFiles = @{}
+        foreach ($file in $files) {
+            if (-not $uniqueFiles.ContainsKey($file.RelativePath)) {
+                $uniqueFiles[$file.RelativePath] = $file
+            }
+        }
+        return $uniqueFiles.Values
     }
     
     return $files
 }
 
-function Get-FilesToInclude {
-    [CmdletBinding()]
-    Param(
-        [Parameter()]
-        [ValidateScript({ Test-Path $_ -PathType Container })]
-        [string]   $RepoRoot,
-
-        [Parameter()]
-        [string[]] $IgnoreFolders = @(),
-
-        [Parameter()]
-        [string[]] $IgnoreFiles   = @(),
-
-        [Parameter()]
-        [ValidateRange(0, [long]::MaxValue)]
-        [long]     $MaxFileSize,
-        
-        [Parameter()]
-        [ValidateSet('scan', 'filelist', 'scanlist', 'listfilter')]
-        [string]   $SelectionMode = 'scan',
-        
-        [Parameter()]
-        [string]   $FileListPath,
-        
-        [Parameter()]
-        [string[]] $FileList = @()
+function Apply-Replacements {
+    param (
+        [Parameter(Mandatory=$true)][string]$Content,
+        [Parameter(Mandatory=$true)][hashtable]$Replacements
     )
     
-    # Read file list if path provided and not already loaded
-    if ($FileListPath -and $FileList.Count -eq 0 -and $SelectionMode -ne 'scan') {
-        $fullPath = Join-Path $RepoRoot $FileListPath
-        $FileList = Get-FileListFromPath -Path $fullPath
-        Write-Verbose "Found $($FileList.Count) files in list at '$FileListPath'"
+    $result = $Content
+    foreach ($key in $Replacements.Keys) {
+        $result = $result.Replace($key, $Replacements[$key])
     }
     
-    # Handle pure filelist mode first
-    if ($SelectionMode -eq 'filelist' -and $FileList.Count -gt 0) {
-        $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-        foreach ($relPath in $FileList) {
-            $fullPath = Join-Path $RepoRoot $relPath
-            if (Test-Path $fullPath -PathType Leaf) {
-                $fileInfo = Get-Item $fullPath
-                Write-Verbose "INCLUDING (from list): $($fileInfo.FullName)"
-                $result.Add($fileInfo)
-            } else {
-                Write-Verbose "WARNING: Listed file not found: $fullPath"
-            }
-        }
-        return $result
-    }
-    
-    # All other modes require scanning
-    $allFiles = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
-    $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-    
-    # For scanlist mode, first add all files from the list
-    if ($SelectionMode -eq 'scanlist' -and $FileList.Count -gt 0) {
-        foreach ($relPath in $FileList) {
-            $fullPath = Join-Path $RepoRoot $relPath
-            if (Test-Path $fullPath -PathType Leaf) {
-                $fileInfo = Get-Item $fullPath
-                Write-Verbose "INCLUDING (from list): $($fileInfo.FullName)"
-                $result.Add($fileInfo)
-            }
-        }
-    }
-    
-    # For all scan-based modes, process files according to filters
-    foreach ($f in $allFiles) {
-        # For listfilter mode, skip files not in the list
-        if ($SelectionMode -eq 'listfilter') {
-            $relativePath = $f.FullName.Substring($RepoRoot.Length).TrimStart([IO.Path]::DirectorySeparatorChar)
-            if ($FileList -notcontains $relativePath) {
-                Write-Verbose "EXCLUDING: $($f.FullName) → not in file list"
-                continue
-            }
-        }
-        
-        # Skip if already included (for scanlist mode)
-        if ($result.Contains($f)) {
-            continue
-        }
-        
-        $reason = $null
-        # Folder pattern check
-        $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar)
-        foreach ($pat in $IgnoreFolders) {
-            $sepRegex = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
-            $segments = $f.DirectoryName -split $sepRegex
-    
-            foreach ($pat in $IgnoreFolders) {
-                if ($segments -like $pat) {
-                    $reason = "matched ignore-folder '$pat'"
-                    break
-                }
-            }
-        }
-        
-        # File name check
-        if (-not $reason) {
-            foreach ($pattern in $IgnoreFiles) {
-                if ($f.Name -like $pattern) {
-                    $reason = "filename '$($f.Name)' matches ignore pattern '$pattern'"
-                    break
-                }
-            }
-        }
-    
-        # Size check
-        if (-not $reason -and $MaxFileSize -gt 0 -and $f.Length -gt $MaxFileSize) {
-            $reason = "exceeds maxFileSize ($MaxFileSize bytes)"
-        }
-
-        if ($reason) {
-            Write-Verbose "EXCLUDING: $($f.FullName) → $reason"
-        } else {
-            # Only add if we're not in listfilter mode or the file is in the list
-            if ($SelectionMode -ne 'listfilter' -or 
-                ($FileList -contains $f.FullName.Substring($RepoRoot.Length).TrimStart([IO.Path]::DirectorySeparatorChar))) {
-                Write-Verbose "INCLUDING: $($f.FullName)"
-                $result.Add($f)
-            }
-        }
-    }
-
     return $result
 }
 
-function Build-ClipboardContent {
-    [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory)]
-        [System.Collections.Generic.List[System.IO.FileInfo]] $Files,
-
-        [Parameter()]
-        [hashtable] $Replacements
+function Get-FileContent {
+    param (
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [Parameter(Mandatory=$true)][hashtable]$Replacements
     )
-    $sb = [System.Text.StringBuilder]::new()
-    foreach ($f in $Files) {
-        $sb.AppendLine("File: $($f.FullName)") | Out-Null
-        $sb.AppendLine(('-' * 60))   | Out-Null
-        $text = Get-Content -Raw -LiteralPath $f.FullName -ErrorAction Stop
-
-        foreach ($token in $Replacements.Keys) {
-            $val = $Replacements[$token]
-            $text = $text -replace ([Regex]::Escape($token)), $val
+    
+        # if this isn’t one of our known-text extensions, show the placeholder
+        $ext = [IO.Path]::GetExtension($FilePath).ToLowerInvariant()
+        if ($ext -notin '.txt','.md','.json','.ps1','.sh') {
+            return '[Binary file content not shown]'
         }
-
-        $sb.AppendLine($text)       | Out-Null
-        $sb.AppendLine()            | Out-Null
-    }
-    return $sb.ToString()
+    
+        # now it’s “text” so read + replace safely
+        $content = Get-Content -Raw -Path $FilePath
+        if ($Replacements.Count -gt 0) {
+            $content = Apply-Replacements -Content $content -Replacements $Replacements
+        }
+        return $content
+    
 }
 
-function Copy-ToClipboard {
+# ───────────────────────────────────────────────────────────────────────
+# Main Function
+# ───────────────────────────────────────────────────────────────────────
+function Copy-RepoToClipboard {
     [CmdletBinding()]
-    Param(
-        [Parameter(Mandatory)]
-        [string] $Content,
-
-        [Parameter()]
-        [switch] $ShowList,
-
-        [Parameter()]
-        [System.Collections.Generic.List[System.IO.FileInfo]] $Files
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$RepoPath = ".",
+        
+        [Parameter(Mandatory = $false)]
+        [string]$ConfigFile = "",
+        
+        [Parameter(Mandatory = $false)]
+        [int]$MaxFileSize = 0,  # 0 means use the value from config
+        
+        [Parameter(Mandatory = $false)]
+        [switch]$ShowCopiedFiles = $false,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$FileListPath = "",
+        
+        [Parameter(Mandatory = $false)]
+        [string]$SelectionMode = ""
     )
-    # Pass the entire string as a single Value, rather than via the pipeline
-    Set-Clipboard -Value $Content
-
-    Write-Host "✅ Copied $($Files.Count) file(s) to clipboard."
-    if ($ShowList) {
-        Write-Host "`nFiles included:"
-        foreach ($f in $Files) {
-            Write-Host " - $($f.FullName)"
+    
+    # Step 1: Load configuration
+    $configPath = Get-ConfigFile -RepoPath $RepoPath -ConfigFile $ConfigFile
+    $defaultConfig = Get-DefaultConfig
+    
+    if ($configPath) {
+        # Load actual config from file
+        $config = Read-ConfigFile -ConfigFilePath $configPath
+        
+        # Merge with defaults for any missing values
+        foreach ($key in $defaultConfig.Keys) {
+            if (-not $config.ContainsKey($key)) {
+                $config[$key] = $defaultConfig[$key]
+            }
         }
+    } else {
+        # Use default config
+        $config = $defaultConfig
+        
+        # Adjust for the provided repo path
+        $config.repoPath = $RepoPath
+    }
+    
+    # Override config with command line parameters
+    if ($RepoPath -ne ".") {
+        $config.repoPath = $RepoPath
+    }
+    
+    # If the user passed –MaxFileSize at all, override even if it’s zero (zero → no limit).
+    if ($PSBoundParameters.ContainsKey('MaxFileSize')) {
+        $config.maxFileSize = $MaxFileSize
+    }
+    
+    if ($ShowCopiedFiles) {
+        $config.showCopiedFiles = $true
+    }
+    
+    if ($FileListPath -ne "") {
+        $config.fileListPath = $FileListPath
+    }
+    
+    if ($SelectionMode -ne "") {
+        $config.selectionMode = $SelectionMode
+    }
+    
+    # Step 2: Get files to include
+    $filesToInclude = Get-FilesToInclude `
+        -RepoPath $config.repoPath `
+        -MaxFileSize $config.maxFileSize `
+        -IgnoreFolders $config.ignoreFolders `
+        -IgnoreFiles $config.ignoreFiles `
+        -FileListPath $config.fileListPath `
+        -SelectionMode $config.selectionMode
+        if ( $filesToInclude.Count -eq 0 ) {
+            Write-Host "–– DEBUG ––"
+            Write-Host " RepoPath:      $($config.repoPath)"
+            Write-Host " maxFileSize:   $($config.maxFileSize)"
+            Write-Host " ignoreFolders: $($config.ignoreFolders -join ', ')"
+            Write-Host " ignoreFiles:   $($config.ignoreFiles   -join ', ')"
+            Write-Host " selectionMode: $($config.selectionMode)"
+            Write-Host " fileListPath:  $($config.fileListPath)"
+            Write-Host "––––––––––––––––"
+        }
+    
+    # Step 3: Process and format files
+    $resultContent = @()
+    
+    foreach ($file in $filesToInclude) {
+        # Format file header with path
+        $header = "File: $($file.Path)`r`n" + "-" * 60
+        $resultContent += $header
+        
+        # Get and process file content
+        $content = Get-FileContent -FilePath $file.Path -Replacements $config.replacements
+        $resultContent += $content
+        $resultContent += ""  # Add blank line between files
+    }
+    
+    # Step 4: Copy to clipboard
+    if ($resultContent.Count -gt 0) {
+        $concatenated = $resultContent -join "`r`n"
+        
+        # Set clipboard
+        Set-Clipboard -Value $concatenated
+        
+        # Optionally show files copied
+        if ($config.showCopiedFiles) {
+            $fileCount = $filesToInclude.Count
+            Write-Host "✅ Copied $fileCount file(s) to clipboard." -ForegroundColor Green
+            
+            foreach ($file in $filesToInclude) {
+                Write-Host "  - $($file.RelativePath)" -ForegroundColor DarkGray
+            }
+        } else {
+            $fileCount = $filesToInclude.Count
+            Write-Host "✅ Copied $fileCount file(s) to clipboard." -ForegroundColor Green
+        }
+        
+        return $true
+    } else {
+        Write-Host "⚠️ No files found to copy." -ForegroundColor Yellow
+        return $false
     }
 }
 
-#–– Begin script logic ––
-
-if (-not $PSBoundParameters.ContainsKey('ConfigFile')) {
-    # Are we running from a script file?
-    if ($MyInvocation.MyCommand.Path) {
-        # Use the folder the script lives in
-        $scriptFolder = Split-Path -Parent $MyInvocation.MyCommand.Path
-    }
-    else {
-        # Interactive / dot-sourced: use the cwd
-        $scriptFolder = (Get-Location).ProviderPath
-    }
-
-    $ConfigFile = Join-Path $scriptFolder 'config.json'
+# ───────────────────────────────────────────────────────────────────────
+# Execute main function if script is run directly
+# ───────────────────────────────────────────────────────────────────────
+if ($MyInvocation.InvocationName -ne ".") {
+    # Script was executed directly (not dot-sourced)
+    $result = Copy-RepoToClipboard `
+        -RepoPath $RepoPath `
+        -ConfigFile $ConfigFile `
+        -MaxFileSize $MaxFileSize `
+        -ShowCopiedFiles:$ShowCopiedFiles `
+        -FileListPath $FileListPath `
+        -SelectionMode $SelectionMode
 }
-
-
-# Load and merge config
-$config = Get-Config -ConfigFilePath $ConfigFile
-
-# Merge CLI parameters over config values
-$rp = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else { $config.repoPath }
-$mf = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
-$if = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
-$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles') -and $IgnoreFiles) { $IgnoreFiles } else { @($config.ignoreFiles) }
-$rep = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
-    $h = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $h[$p.Name] = $p.Value }; $h
-}
-$scf = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) {
-    $ShowCopiedFiles.IsPresent
-} else {
-    [bool]$config.showCopiedFiles
-}
-$sm = if ($PSBoundParameters.ContainsKey('SelectionMode')) { $SelectionMode } else { 
-    if ($null -ne $config.PSObject.Properties['selectionMode']) { $config.selectionMode } else { 'scan' } 
-}
-$flp = if ($PSBoundParameters.ContainsKey('FileListPath')) { $FileListPath } else { 
-    if ($null -ne $config.PSObject.Properties['fileListPath']) { $config.fileListPath } else { $null } 
-}
-
-if ($null -eq $if) { $if = @() }
-if ($null -eq $ifl) { $ifl = @() }
-
-# Gather, filter, and log
-$filesToCopy = Get-FilesToInclude `
-           -RepoRoot      $rp `
-           -IgnoreFolders $if `
-           -IgnoreFiles   $ifl `
-           -MaxFileSize   $mf `
-           -SelectionMode $sm `
-           -FileListPath  $flp
-
-if ($filesToCopy.Count -eq 0) {
-    Write-Warning 'No files passed the filters; nothing to copy.'
-    return
-}
-
-# Build content & copy
-$content = Build-ClipboardContent -Files $filesToCopy -Replacements $rep
-Copy-ToClipboard -Content $content -ShowList:$scf -Files $filesToCopy
