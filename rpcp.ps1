@@ -67,6 +67,13 @@ Param(
     [string]   $ConfigFile,
 
     [Parameter()]
+    [ValidateSet('scan', 'filelist', 'scanlist', 'listfilter')]
+    [string]   $SelectionMode = "scan",
+
+    [Parameter()]
+    [string]   $FileListPath = "include.md",
+
+    [Parameter()]
     [ValidateRange(0, [long]::MaxValue)]
     [long]     $MaxFileSize,
 
@@ -101,6 +108,38 @@ function Get-Config {
         Write-Error "Failed to load config from '$ConfigFilePath': $_" -ErrorAction Stop
     }
 }
+function Get-FileListFromPath {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory)]
+        [string] $Path
+    )
+    
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        Write-Warning "File list path '$Path' not found."
+        return @()
+    }
+    
+    $content = Get-Content -Path $Path
+    $files = @()
+    
+    foreach ($line in $content) {
+        # Skip empty lines and lines starting with #, >, or -
+        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^\s*[#>-]') {
+            continue
+        }
+        
+        # Extract file paths (look for things that look like paths)
+        if ($line -match '[\w\d\._-]+[\\/][\w\d\._-]+') {
+            $match = $Matches[0]
+            # Normalize path separators
+            $normalizedPath = $match.Replace('\', [IO.Path]::DirectorySeparatorChar).Replace('/', [IO.Path]::DirectorySeparatorChar)
+            $files += $normalizedPath
+        }
+    }
+    
+    return $files
+}
 
 function Get-FilesToInclude {
     [CmdletBinding()]
@@ -109,38 +148,97 @@ function Get-FilesToInclude {
         [ValidateScript({ Test-Path $_ -PathType Container })]
         [string]   $RepoRoot,
 
-        # ↓↓↓ CHANGE #1 – remove Mandatory, give default @()
         [Parameter()]
         [string[]] $IgnoreFolders = @(),
 
-        # ↓↓↓ CHANGE #2 – remove Mandatory, give default @()
         [Parameter()]
         [string[]] $IgnoreFiles   = @(),
 
         [Parameter()]
-
         [ValidateRange(0, [long]::MaxValue)]
-        [long]     $MaxFileSize
+        [long]     $MaxFileSize,
+        
+        [Parameter()]
+        [ValidateSet('scan', 'filelist', 'scanlist', 'listfilter')]
+        [string]   $SelectionMode = 'scan',
+        
+        [Parameter()]
+        [string]   $FileListPath,
+        
+        [Parameter()]
+        [string[]] $FileList = @()
     )
-    $all = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
+    
+    # Read file list if path provided and not already loaded
+    if ($FileListPath -and $FileList.Count -eq 0 -and $SelectionMode -ne 'scan') {
+        $fullPath = Join-Path $RepoRoot $FileListPath
+        $FileList = Get-FileListFromPath -Path $fullPath
+        Write-Verbose "Found $($FileList.Count) files in list at '$FileListPath'"
+    }
+    
+    # Handle pure filelist mode first
+    if ($SelectionMode -eq 'filelist' -and $FileList.Count -gt 0) {
+        $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+        foreach ($relPath in $FileList) {
+            $fullPath = Join-Path $RepoRoot $relPath
+            if (Test-Path $fullPath -PathType Leaf) {
+                $fileInfo = Get-Item $fullPath
+                Write-Verbose "INCLUDING (from list): $($fileInfo.FullName)"
+                $result.Add($fileInfo)
+            } else {
+                Write-Verbose "WARNING: Listed file not found: $fullPath"
+            }
+        }
+        return $result
+    }
+    
+    # All other modes require scanning
+    $allFiles = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
     $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-
-    foreach ($f in $all) {
+    
+    # For scanlist mode, first add all files from the list
+    if ($SelectionMode -eq 'scanlist' -and $FileList.Count -gt 0) {
+        foreach ($relPath in $FileList) {
+            $fullPath = Join-Path $RepoRoot $relPath
+            if (Test-Path $fullPath -PathType Leaf) {
+                $fileInfo = Get-Item $fullPath
+                Write-Verbose "INCLUDING (from list): $($fileInfo.FullName)"
+                $result.Add($fileInfo)
+            }
+        }
+    }
+    
+    # For all scan-based modes, process files according to filters
+    foreach ($f in $allFiles) {
+        # For listfilter mode, skip files not in the list
+        if ($SelectionMode -eq 'listfilter') {
+            $relativePath = $f.FullName.Substring($RepoRoot.Length).TrimStart([IO.Path]::DirectorySeparatorChar)
+            if ($FileList -notcontains $relativePath) {
+                Write-Verbose "EXCLUDING: $($f.FullName) → not in file list"
+                continue
+            }
+        }
+        
+        # Skip if already included (for scanlist mode)
+        if ($result.Contains($f)) {
+            continue
+        }
+        
         $reason = $null
         # Folder pattern check
         $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar)
         foreach ($pat in $IgnoreFolders) {
-            $sepRegex   = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
-            $segments   = $f.DirectoryName -split $sepRegex      # safe on Win & *nix
+            $sepRegex = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
+            $segments = $f.DirectoryName -split $sepRegex
     
             foreach ($pat in $IgnoreFolders) {
                 if ($segments -like $pat) {
                     $reason = "matched ignore-folder '$pat'"
                     break
                 }
-
             }
         }
+        
         # File name check
         if (-not $reason) {
             foreach ($pattern in $IgnoreFiles) {
@@ -159,8 +257,12 @@ function Get-FilesToInclude {
         if ($reason) {
             Write-Verbose "EXCLUDING: $($f.FullName) → $reason"
         } else {
-            Write-Verbose "INCLUDING: $($f.FullName)"
-            $result.Add($f)
+            # Only add if we're not in listfilter mode or the file is in the list
+            if ($SelectionMode -ne 'listfilter' -or 
+                ($FileList -contains $f.FullName.Substring($RepoRoot.Length).TrimStart([IO.Path]::DirectorySeparatorChar))) {
+                Write-Verbose "INCLUDING: $($f.FullName)"
+                $result.Add($f)
+            }
         }
     }
 
@@ -240,18 +342,24 @@ $config = Get-Config -ConfigFilePath $ConfigFile
 # Merge CLI parameters over config values
 $rp = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else { $config.repoPath }
 $mf = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
-$if  = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
-$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles')   -and $IgnoreFiles)   { $IgnoreFiles }   else { @($config.ignoreFiles) }
+$if = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
+$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles') -and $IgnoreFiles) { $IgnoreFiles } else { @($config.ignoreFiles) }
 $rep = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
     $h = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $h[$p.Name] = $p.Value }; $h
 }
 $scf = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) {
     $ShowCopiedFiles.IsPresent
- } else {
+} else {
     [bool]$config.showCopiedFiles
- }
+}
+$sm = if ($PSBoundParameters.ContainsKey('SelectionMode')) { $SelectionMode } else { 
+    if ($null -ne $config.PSObject.Properties['selectionMode']) { $config.selectionMode } else { 'scan' } 
+}
+$flp = if ($PSBoundParameters.ContainsKey('FileListPath')) { $FileListPath } else { 
+    if ($null -ne $config.PSObject.Properties['fileListPath']) { $config.fileListPath } else { $null } 
+}
 
-if ($null -eq $if)  { $if  = @() }
+if ($null -eq $if) { $if = @() }
 if ($null -eq $ifl) { $ifl = @() }
 
 # Gather, filter, and log
@@ -259,8 +367,9 @@ $filesToCopy = Get-FilesToInclude `
            -RepoRoot      $rp `
            -IgnoreFolders $if `
            -IgnoreFiles   $ifl `
-           -MaxFileSize   $mf
-
+           -MaxFileSize   $mf `
+           -SelectionMode $sm `
+           -FileListPath  $flp
 
 if ($filesToCopy.Count -eq 0) {
     Write-Warning 'No files passed the filters; nothing to copy.'

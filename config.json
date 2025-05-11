@@ -5,5 +5,7 @@
     "ignoreFiles": ["manifest.json", "package-lock.json","*.png","*.jpg","*.jpeg","*.gif","*.svg","*.zip","*.tar.gz","*.tgz","*.tfstate", "*.tfstate.backup", "*.tfvars", "*.tfvars.json", "*.tfplan", "*.tfplan.json","*.avif","*.webp"],
     "replacements": { "ACME":"Company_name","Bob":"Redacted_name","Secret Project Name":"Redacted_project_name" },
     "showCopiedFiles": true,
-    "autoInstallDeps": true
+    "autoInstallDeps": true,
+    "selectionMode": "scan",
+    "fileListPath":  "include.md"
   }
