@@ -109,11 +109,9 @@ function Get-FilesToInclude {
         [ValidateScript({ Test-Path $_ -PathType Container })]
         [string]   $RepoRoot,
 
-        # ↓↓↓ CHANGE #1 – remove Mandatory, give default @()
         [Parameter()]
         [string[]] $IgnoreFolders = @(),
 
-        # ↓↓↓ CHANGE #2 – remove Mandatory, give default @()
         [Parameter()]
         [string[]] $IgnoreFiles   = @(),
 
@@ -122,29 +120,29 @@ function Get-FilesToInclude {
         [ValidateRange(0, [long]::MaxValue)]
         [long]     $MaxFileSize
     )
-    $all = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
+    $allFiles = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
     $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
 
-    foreach ($f in $all) {
+    foreach ($f in $allFiles) {
         $reason = $null
+
         # Folder pattern check
-        $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar)
-        foreach ($pat in $IgnoreFolders) {
+
+        $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar) 
+        foreach ($folderPattern in $IgnoreFolders) {
             $sepRegex   = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
             $segments   = $f.DirectoryName -split $sepRegex      # safe on Win & *nix
-    
-            foreach ($pat in $IgnoreFolders) {
-                if ($segments -like $pat) {
-                    $reason = "matched ignore-folder '$pat'"
-                    break
-                }
-
+            if ($segments -like $folderPattern) {
+                $reason = "matched ignore-folder '$folderPattern'"
+                break
             }
         }
+
         # File name check
+
         if (-not $reason) {
             foreach ($pattern in $IgnoreFiles) {
-                if ($f.Name -like $pattern) {
+                if (($f.Name) -like $pattern) {
                     $reason = "filename '$($f.Name)' matches ignore pattern '$pattern'"
                     break
                 }
@@ -152,7 +150,11 @@ function Get-FilesToInclude {
         }
     
         # Size check
-        if (-not $reason -and $MaxFileSize -gt 0 -and $f.Length -gt $MaxFileSize) {
+        if (
+            -not $reason -and `
+            $MaxFileSize -gt 0 -and `
+            $f.Length -gt $MaxFileSize
+        ) {
             $reason = "exceeds maxFileSize ($MaxFileSize bytes)"
         }
 
@@ -176,10 +178,10 @@ function Build-ClipboardContent {
         [Parameter()]
         [hashtable] $Replacements
     )
-    $sb = [System.Text.StringBuilder]::new()
+    $stringBulder = [System.Text.StringBuilder]::new()
     foreach ($f in $Files) {
-        $sb.AppendLine("File: $($f.FullName)") | Out-Null
-        $sb.AppendLine(('-' * 60))   | Out-Null
+        $stringBulder.AppendLine("File: $($f.FullName)") | Out-Null # Appends the file name
+        $stringBulder.AppendLine(('-' * 60))   | Out-Null # Appends 60 hypens as a seperator
         $text = Get-Content -Raw -LiteralPath $f.FullName -ErrorAction Stop
 
         foreach ($token in $Replacements.Keys) {
@@ -187,10 +189,10 @@ function Build-ClipboardContent {
             $text = $text -replace ([Regex]::Escape($token)), $val
         }
 
-        $sb.AppendLine($text)       | Out-Null
-        $sb.AppendLine()            | Out-Null
+        $stringBulder.AppendLine($text)       | Out-Null
+        $stringBulder.AppendLine()            | Out-Null
     }
-    return $sb.ToString()
+    return $stringBulder.ToString()
 }
 
 function Copy-ToClipboard {
@@ -205,8 +207,7 @@ function Copy-ToClipboard {
         [Parameter()]
         [System.Collections.Generic.List[System.IO.FileInfo]] $Files
     )
-    # Pass the entire string as a single Value, rather than via the pipeline
-    Set-Clipboard -Value $Content
+    Set-Clipboard -Value $Content # Pass the entire string as a single Value, rather than via the pipeline
 
     Write-Host "✅ Copied $($Files.Count) file(s) to clipboard."
     if ($ShowList) {
@@ -238,28 +239,28 @@ if (-not $PSBoundParameters.ContainsKey('ConfigFile')) {
 $config = Get-Config -ConfigFilePath $ConfigFile
 
 # Merge CLI parameters over config values
-$rp = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else { $config.repoPath }
-$mf = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
-$if  = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
-$ifl = if ($PSBoundParameters.ContainsKey('IgnoreFiles')   -and $IgnoreFiles)   { $IgnoreFiles }   else { @($config.ignoreFiles) }
-$rep = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
-    $h = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $h[$p.Name] = $p.Value }; $h
+$repoPath = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else { $config.repoPath }
+$maxFileSize = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
+$ignoreFolders  = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
+$ignoreFiles = if ($PSBoundParameters.ContainsKey('IgnoreFiles')   -and $IgnoreFiles)   { $IgnoreFiles }   else { @($config.ignoreFiles) }
+$replacements = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
+    $tempHashtable = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $tempHashtable[$p.Name] = $p.Value }; $tempHashtable
 }
-$scf = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) {
+$shouldShowCopiedFiles = if ($PSBoundParameters.ContainsKey('ShowCopiedFiles')) {
     $ShowCopiedFiles.IsPresent
  } else {
     [bool]$config.showCopiedFiles
  }
 
-if ($null -eq $if)  { $if  = @() }
-if ($null -eq $ifl) { $ifl = @() }
+if ($null -eq $ignoreFiles)  { $ignoreFiles  = @() }
+if ($null -eq $ignoreFolders) { $ignoreFolders = @() }
 
 # Gather, filter, and log
 $filesToCopy = Get-FilesToInclude `
-           -RepoRoot      $rp `
-           -IgnoreFolders $if `
-           -IgnoreFiles   $ifl `
-           -MaxFileSize   $mf
+           -RepoRoot      $repoPath `
+           -IgnoreFolders $ignoreFolders `
+           -IgnoreFiles   $ignoreFiles `
+           -MaxFileSize   $maxFileSize
 
 
 if ($filesToCopy.Count -eq 0) {
@@ -268,5 +269,5 @@ if ($filesToCopy.Count -eq 0) {
 }
 
 # Build content & copy
-$content = Build-ClipboardContent -Files $filesToCopy -Replacements $rep
-Copy-ToClipboard -Content $content -ShowList:$scf -Files $filesToCopy
+$content = Build-ClipboardContent -Files $filesToCopy -Replacements $replacements
+Copy-ToClipboard -Content $content -ShowList:$shouldShowCopiedFiles -Files $filesToCopy
