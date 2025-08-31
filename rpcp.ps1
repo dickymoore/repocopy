@@ -280,6 +280,7 @@ function Get-FileContent {
         [Parameter(Mandatory=$true)][string]$FilePath,
         [Parameter(Mandatory=$true)][hashtable]$Replacements
     )
+ 
     
         # if this isn’t one of our known-text extensions, show the placeholder
         $ext = [IO.Path]::GetExtension($FilePath).ToLowerInvariant()
@@ -293,7 +294,6 @@ function Get-FileContent {
             $content = Apply-Replacements -Content $content -Replacements $Replacements
         }
         return $content
-    
 }
 
 # ───────────────────────────────────────────────────────────────────────
