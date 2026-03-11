@@ -20,7 +20,7 @@ setup() {
 
   # ── ① disposable sandbox repo ──────────────────────────────
   TMP_REPO="$(mktemp -d)"
-  mkdir -p "$TMP_REPO/src" "$TMP_REPO/build"
+  mkdir -p "$TMP_REPO/src" "$TMP_REPO/build" "$TMP_REPO/.codex/prompts"
 
   # source files
   printf 'hello ClientName\n' >"$TMP_REPO/src/include.txt"
@@ -32,6 +32,7 @@ setup() {
 
   # something inside an ignored folder
   printf 'ignore me\n' >"$TMP_REPO/build/output.txt"
+  printf 'hidden codex notes\n' >"$TMP_REPO/.codex/prompts/agent.md"
 
   # config.json that matches the Pester suite
   cat >"$TMP_REPO/config.json" <<'JSON'
@@ -89,6 +90,7 @@ run_rpcp_launcher() {
   refute_regex "$CLIP" "config\\.json"
   refute_regex "$CLIP" "output\\.txt"
   refute_regex "$CLIP" "big\\.bin"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
 }
 
 @test "size filter: big.bin is excluded by default" {
@@ -108,6 +110,20 @@ run_rpcp_launcher() {
   refute_regex "$CLIP" "build/output\\.txt"
 }
 
+@test "hidden folders are excluded by default" {
+  run_rpcp --repo-path "$TMP_REPO" --config-file "$TMP_REPO/config.json"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
+}
+
+@test "--include-hidden-folders includes dot-prefixed directories" {
+  run_rpcp --repo-path "$TMP_REPO" \
+           --config-file "$TMP_REPO/config.json" \
+           --include-hidden-folders
+
+  assert_regex "$CLIP" "\\.codex/prompts/agent\\.md"
+  assert_regex "$CLIP" "hidden codex notes"
+}
+
 @test "--show-copied-files does not affect clipboard content" {
   run_rpcp --repo-path "$TMP_REPO" \
            --config-file "$TMP_REPO/config.json" \
@@ -124,6 +140,7 @@ run_rpcp_launcher() {
   assert_success
   assert_regex "$CLIP" "include\\.txt"
   assert_regex "$CLIP" "hello Bob"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
   refute_regex "$CLIP" "manifest\\.json"
   refute_regex "$CLIP" "config\\.json"
 }

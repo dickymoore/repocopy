@@ -86,11 +86,14 @@ rpcp --repo-path ~/src/my-project --verbose
   "repoPath": ".",
 
   // ignore folders / files (globs ok)
-  "ignoreFolders": ["build", ".git", "node_modules"],
+  "ignoreFolders": ["build", "node_modules"],
   "ignoreFiles":   ["manifest.json", "*.png"],
 
   // max bytes per file (0 = unlimited)
   "maxFileSize": 204800,
+
+  // include dot-prefixed folders like .codex and .git
+  "includeHiddenFolders": false,
 
   // string replacements applied to every file (So in this case, ACME will be replaced with Company_name)
   "replacements": {
@@ -108,6 +111,10 @@ rpcp --repo-path ~/src/my-project --verbose
 Every CLI switch overrides the matching JSON field – handy when you just
 need to bump `--max-file-size` for one run.
 
+Dot-prefixed folders such as `.codex`, `.git`, and `.github` are excluded by
+default. Set `includeHiddenFolders` to `true`, or use the CLI switch for a
+one-off run, if you want them included.
+
 ---
 
 ## 💻 Usage snippets
@@ -121,6 +128,9 @@ rpcp
 # disable size filter
 rpcp -MaxFileSize 0
 
+# include hidden folders like .codex for one run
+rpcp -IncludeHiddenFolders
+
 # different folder, quiet output
 rpcp -RepoPath C:\Code\Foo -Verbose:$false
 ```
@@ -133,6 +143,9 @@ rpcp
 
 # disable size filter & summary
 rpcp --max-file-size 0 --show-copied-files=false
+
+# include hidden folders like .codex for one run
+rpcp --include-hidden-folders
 
 # different folder
 rpcp --repo-path ~/Code/Foo
