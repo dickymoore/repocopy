@@ -183,6 +183,24 @@ build_content() {
   done
 }
 
+# Best-effort terminal clipboard fallback for environments without a native
+# clipboard command installed.
+copy_to_osc52() {
+  local content="$1"
+  local encoded
+
+  command -v base64 &>/dev/null || return 1
+  [[ -w /dev/tty ]] || return 1
+
+  encoded=$(printf '%s' "$content" | base64 | tr -d '\r\n')
+
+  if [[ -n "${TMUX:-}" ]]; then
+    printf '\033Ptmux;\033\033]52;c;%s\a\033\\' "$encoded" > /dev/tty
+  else
+    printf '\033]52;c;%s\a' "$encoded" > /dev/tty
+  fi
+}
+
 # Copy STDIN to clipboard on macOS, Linux, WSL
 copy_to_clipboard() {
   local content
@@ -191,12 +209,18 @@ copy_to_clipboard() {
     printf '%s' "$content" | pbcopy
   elif command -v xclip &>/dev/null; then
     printf '%s' "$content" | xclip -selection clipboard
+  elif command -v wl-copy &>/dev/null; then
+    printf '%s' "$content" | wl-copy
+  elif command -v xsel &>/dev/null; then
+    printf '%s' "$content" | xsel --clipboard --input
   elif command -v clip.exe &>/dev/null; then
     printf '%s' "$content" | clip.exe
   elif command -v powershell.exe &>/dev/null; then
     printf '%s' "$content" | powershell.exe -NoProfile -Command "Set-Clipboard"
+  elif copy_to_osc52 "$content"; then
+    :
   else
-    echo "Error: no clipboard utility found (pbcopy, xclip, clip.exe or powershell.exe)" >&2
+    echo "Error: no clipboard utility found (pbcopy, xclip, wl-copy, xsel, clip.exe, powershell.exe, or OSC52 terminal clipboard)" >&2
     exit 3
   fi
 }

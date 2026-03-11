@@ -64,7 +64,7 @@ rpcp --repo-path ~/src/my-project --verbose
 ```
 
 > **Clipboard helpers** –  
-> • Linux: requires `xclip`  
+> • Linux: uses `xclip`, `wl-copy`, `xsel`, or OSC52 terminal clipboard support  
 > • macOS: uses `pbcopy`  
 > • WSL: uses `clip.exe`
 
@@ -74,7 +74,7 @@ rpcp --repo-path ~/src/my-project --verbose
 
 * **Bash** 4+ **or** **PowerShell** 7+
 * `jq` – for the Bash version (auto‑installed if `autoInstallDeps = true`)
-* A clipboard tool (`pbcopy`, `xclip`, `clip.exe`, or `pwsh`)
+* A clipboard tool (`pbcopy`, `xclip`, `wl-copy`, `xsel`, `clip.exe`, `pwsh`, or OSC52 terminal clipboard support)
 
 ---
 

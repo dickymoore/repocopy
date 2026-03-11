@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(
+  CDPATH= cd -- "$(dirname -- "$0")" && pwd
+)"
+RPCP_SCRIPT="$SCRIPT_DIR/rpcp.sh"
+DEFAULT_CONFIG="$SCRIPT_DIR/config.json"
+
+USE_EXPLICIT_CONFIG=0
+for arg in "$@"; do
+  case "$arg" in
+    --config-file|--config-file=*)
+      USE_EXPLICIT_CONFIG=1
+      break
+      ;;
+  esac
+done
+
+if [[ $USE_EXPLICIT_CONFIG -eq 1 || -f "$PWD/config.json" ]]; then
+  exec bash "$RPCP_SCRIPT" "$@"
+fi
+
+exec bash "$RPCP_SCRIPT" --config-file "$DEFAULT_CONFIG" "$@"
