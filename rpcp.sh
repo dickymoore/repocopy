@@ -10,7 +10,7 @@
 #   rpcp.sh [--repo-path path] [--config-file file]
 #               [--max-file-size bytes] [--ignore-folders pat1,pat2]
 #               [--ignore-files f1,f2] [--replacements '{"T":"v",...}']
-#               [--show-copied-files] [--verbose]
+#               [--include-hidden-folders] [--show-copied-files] [--verbose]
 #
 # Example:
 #   rpcp.sh --verbose
@@ -94,7 +94,7 @@ usage() {
 # Parse CLI arguments
 parse_args() {
   local opts
-  opts=$(getopt -o h --long help,repo-path:,config-file:,max-file-size:,ignore-folders:,ignore-files:,replacements:,show-copied-files,verbose -- "$@")
+  opts=$(getopt -o h --long help,repo-path:,config-file:,max-file-size:,ignore-folders:,ignore-files:,replacements:,include-hidden-folders,show-copied-files,verbose -- "$@")
   eval set -- "$opts"
   while true; do
     case "$1" in
@@ -104,6 +104,7 @@ parse_args() {
       --ignore-folders)      CLI_IGNORE_FOLDERS="$2"; shift 2;;
       --ignore-files)        CLI_IGNORE_FILES="$2"; shift 2;;
       --replacements)        CLI_REPLACEMENTS_JSON="$2"; shift 2;;
+      --include-hidden-folders) CLI_INCLUDE_HIDDEN_FOLDERS="true"; shift;;
       --show-copied-files)   CLI_SHOW_COPIED_FILES="true"; shift;;
       --verbose)             VERBOSE=1; shift;;
       -h|--help)             usage;;
@@ -116,6 +117,11 @@ parse_args() {
 # Split comma-separated list into an array
 csv_to_array() {
   local IFS=','; read -r -a arr <<< "$1"; echo "${arr[@]}"
+}
+
+is_truthy() {
+  local value="${1:-}"
+  [[ "${value,,}" == "true" || "$value" == "1" ]]
 }
 
 # Decide whether to include a file; log if verbose
@@ -156,7 +162,11 @@ should_include() {
 
 # Collect files to include
 collect_files() {
-  mapfile -t ALL_FILES < <(find "$REPO_PATH" -type f)
+  if is_truthy "$INCLUDE_HIDDEN_FOLDERS"; then
+    mapfile -t ALL_FILES < <(find "$REPO_PATH" -type f)
+  else
+    mapfile -t ALL_FILES < <(find "$REPO_PATH" \( -type d -name '.*' ! -path "$REPO_PATH" \) -prune -o -type f -print)
+  fi
   INCLUDED_FILES=()
   for f in "${ALL_FILES[@]}"; do
     if should_include "$f"; then
@@ -183,6 +193,24 @@ build_content() {
   done
 }
 
+# Best-effort terminal clipboard fallback for environments without a native
+# clipboard command installed.
+copy_to_osc52() {
+  local content="$1"
+  local encoded
+
+  command -v base64 &>/dev/null || return 1
+  [[ -w /dev/tty ]] || return 1
+
+  encoded=$(printf '%s' "$content" | base64 | tr -d '\r\n')
+
+  if [[ -n "${TMUX:-}" ]]; then
+    printf '\033Ptmux;\033\033]52;c;%s\a\033\\' "$encoded" > /dev/tty
+  else
+    printf '\033]52;c;%s\a' "$encoded" > /dev/tty
+  fi
+}
+
 # Copy STDIN to clipboard on macOS, Linux, WSL
 copy_to_clipboard() {
   local content
@@ -191,12 +219,18 @@ copy_to_clipboard() {
     printf '%s' "$content" | pbcopy
   elif command -v xclip &>/dev/null; then
     printf '%s' "$content" | xclip -selection clipboard
+  elif command -v wl-copy &>/dev/null; then
+    printf '%s' "$content" | wl-copy
+  elif command -v xsel &>/dev/null; then
+    printf '%s' "$content" | xsel --clipboard --input
   elif command -v clip.exe &>/dev/null; then
     printf '%s' "$content" | clip.exe
   elif command -v powershell.exe &>/dev/null; then
     printf '%s' "$content" | powershell.exe -NoProfile -Command "Set-Clipboard"
+  elif copy_to_osc52 "$content"; then
+    :
   else
-    echo "Error: no clipboard utility found (pbcopy, xclip, clip.exe or powershell.exe)" >&2
+    echo "Error: no clipboard utility found (pbcopy, xclip, wl-copy, xsel, clip.exe, powershell.exe, or OSC52 terminal clipboard)" >&2
     exit 3
   fi
 }
@@ -233,6 +267,7 @@ load_config() {
   local cfg="$1"
   REPO_PATH=$(jq -r '.repoPath // "."' "$cfg")
   MAX_FILE_SIZE=$(jq -r '.maxFileSize // 0' "$cfg")
+  INCLUDE_HIDDEN_FOLDERS=$(jq -r '.includeHiddenFolders // false' "$cfg")
   SHOW_COPIED_FILES=$(jq -r '.showCopiedFiles // false' "$cfg")
   mapfile -t CFG_IGNORE_FOLDERS < <(jq -r '.ignoreFolders[]?' "$cfg")
   mapfile -t CFG_IGNORE_FILES   < <(jq -r '.ignoreFiles[]?' "$cfg")
@@ -247,6 +282,7 @@ load_config "$CONFIG_FILE"
 # Merge CLI overrides
 REPO_PATH=${CLI_REPO_PATH:-$REPO_PATH}
 MAX_FILE_SIZE=${CLI_MAX_FILE_SIZE:-$MAX_FILE_SIZE}
+INCLUDE_HIDDEN_FOLDERS=${CLI_INCLUDE_HIDDEN_FOLDERS:-$INCLUDE_HIDDEN_FOLDERS}
 SHOW_COPIED_FILES=${CLI_SHOW_COPIED_FILES:-$SHOW_COPIED_FILES}
 
 if [[ -n "${CLI_IGNORE_FOLDERS:-}" ]]; then
@@ -280,7 +316,7 @@ build_content | copy_to_clipboard
 
 # Show summary
 echo "✅ Copied ${#INCLUDED_FILES[@]} file(s) to clipboard."
-if [[ $SHOW_COPIED_FILES == "true" || $SHOW_COPIED_FILES == "1" ]]; then
+if is_truthy "$SHOW_COPIED_FILES"; then
   echo
   echo "Files included:"
   for f in "${INCLUDED_FILES[@]}"; do

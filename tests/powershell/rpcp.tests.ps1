@@ -30,7 +30,14 @@ Describe 'rpcp.ps1 end-to-end behaviour (fixture repo)' {
         if (-not (Test-Path "$FixtureRoot/image.png")) {
             [IO.File]::WriteAllBytes("$FixtureRoot/image.png",[byte[]](0..9))
         }
-        @'
+        if (-not (Test-Path "$FixtureRoot/.codex/prompts")) {
+            New-Item -ItemType Directory -Path "$FixtureRoot/.codex/prompts" -Force | Out-Null
+        }
+        if (-not (Test-Path "$FixtureRoot/.codex/prompts/agent.md")) {
+            'hidden codex notes' | Set-Content "$FixtureRoot/.codex/prompts/agent.md"
+        }
+        if (-not (Test-Path "$FixtureRoot/config.json")) {
+            @'
 {
   "repoPath": ".",
   "maxFileSize": 204800,
@@ -40,6 +47,7 @@ Describe 'rpcp.ps1 end-to-end behaviour (fixture repo)' {
   "showCopiedFiles": false
 }
 '@ | Set-Content "$FixtureRoot/config.json"
+        }
         # -- extra files for later tests -----------------------------------
         if (-not (Test-Path "$FixtureRoot/src/big.bin")) {
             $size  = 300kb            # 300 KiB  >  maxFileSize
@@ -96,6 +104,29 @@ function Invoke-Rpcp {
             $copied | Should -Not -Match 'config\.json'
             $copied | Should -Not -Match 'output\.txt'
             $copied | Should -Not -Match 'big\.bin'
+            $copied | Should -Not -Match '\.codex[\\/]+prompts[\\/]+agent\.md'
+        }
+    }
+
+    Context 'Hidden folder handling' {
+        It 'excludes dot-prefixed folders by default' {
+            $copied = Invoke-Rpcp -Param @{
+                RepoPath   = $FixtureRoot
+                ConfigFile = "$FixtureRoot/config.json"
+            }
+
+            $copied | Should -Not -Match '\.codex[\\/]+prompts[\\/]+agent\.md'
+        }
+
+        It 'includes dot-prefixed folders when -IncludeHiddenFolders is used' {
+            $copied = Invoke-Rpcp -Param @{
+                RepoPath             = $FixtureRoot
+                ConfigFile           = "$FixtureRoot/config.json"
+                IncludeHiddenFolders = $true
+            }
+
+            $copied | Should -Match '\.codex[\\/]+prompts[\\/]+agent\.md'
+            $copied | Should -Match 'hidden codex notes'
         }
     }
 

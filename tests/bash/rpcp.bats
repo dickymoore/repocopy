@@ -16,9 +16,11 @@ load 'test_helper/bats-support/load'
 load 'test_helper/bats-assert/load'
 
 setup() {
+  PROJECT_ROOT="$PWD"
+
   # ── ① disposable sandbox repo ──────────────────────────────
   TMP_REPO="$(mktemp -d)"
-  mkdir -p "$TMP_REPO/src" "$TMP_REPO/build"
+  mkdir -p "$TMP_REPO/src" "$TMP_REPO/build" "$TMP_REPO/.codex/prompts"
 
   # source files
   printf 'hello ClientName\n' >"$TMP_REPO/src/include.txt"
@@ -30,6 +32,7 @@ setup() {
 
   # something inside an ignored folder
   printf 'ignore me\n' >"$TMP_REPO/build/output.txt"
+  printf 'hidden codex notes\n' >"$TMP_REPO/.codex/prompts/agent.md"
 
   # config.json that matches the Pester suite
   cat >"$TMP_REPO/config.json" <<'JSON'
@@ -66,6 +69,12 @@ run_rpcp() {
   CLIP="$(cat "$CLIP_FILE")"
 }
 
+run_rpcp_launcher() {
+  local repo_path="$1"
+  run env PATH="$PROJECT_ROOT:$STUB_DIR:$PATH" bash -c "cd '$repo_path' && rpcp"
+  CLIP="$(cat "$CLIP_FILE")"
+}
+
 # ─────────────────────────────────────────────────────────────
 @test "default run: copies only permitted files & replaces tokens" {
   run_rpcp --repo-path "$TMP_REPO" --config-file "$TMP_REPO/config.json"
@@ -81,6 +90,7 @@ run_rpcp() {
   refute_regex "$CLIP" "config\\.json"
   refute_regex "$CLIP" "output\\.txt"
   refute_regex "$CLIP" "big\\.bin"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
 }
 
 @test "size filter: big.bin is excluded by default" {
@@ -100,6 +110,20 @@ run_rpcp() {
   refute_regex "$CLIP" "build/output\\.txt"
 }
 
+@test "hidden folders are excluded by default" {
+  run_rpcp --repo-path "$TMP_REPO" --config-file "$TMP_REPO/config.json"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
+}
+
+@test "--include-hidden-folders includes dot-prefixed directories" {
+  run_rpcp --repo-path "$TMP_REPO" \
+           --config-file "$TMP_REPO/config.json" \
+           --include-hidden-folders
+
+  assert_regex "$CLIP" "\\.codex/prompts/agent\\.md"
+  assert_regex "$CLIP" "hidden codex notes"
+}
+
 @test "--show-copied-files does not affect clipboard content" {
   run_rpcp --repo-path "$TMP_REPO" \
            --config-file "$TMP_REPO/config.json" \
@@ -108,4 +132,31 @@ run_rpcp() {
   # The script prints the file list to stdout;
   # we just need to ensure normal data is still on the clipboard
   assert_regex "$CLIP" "include\\.txt"
+}
+
+@test "rpcp launcher prefers the current directory config.json" {
+  run_rpcp_launcher "$TMP_REPO"
+
+  assert_success
+  assert_regex "$CLIP" "include\\.txt"
+  assert_regex "$CLIP" "hello Bob"
+  refute_regex "$CLIP" "\\.codex/prompts/agent\\.md"
+  refute_regex "$CLIP" "manifest\\.json"
+  refute_regex "$CLIP" "config\\.json"
+}
+
+@test "rpcp launcher falls back to the bundled config when local config.json is missing" {
+  local no_config_repo
+  no_config_repo="$(mktemp -d)"
+  trap 'rm -rf "$no_config_repo"' RETURN
+
+  printf 'hello from launcher\n' >"$no_config_repo/include.txt"
+  printf 'ignore me\n'          >"$no_config_repo/manifest.json"
+
+  run_rpcp_launcher "$no_config_repo"
+
+  assert_success
+  assert_regex "$CLIP" "include\\.txt"
+  assert_regex "$CLIP" "hello from launcher"
+  refute_regex "$CLIP" "manifest\\.json"
 }

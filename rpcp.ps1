@@ -37,6 +37,10 @@
    Hashtable of token → replacement pairs.
    Overrides the config file’s replacements when specified.
 
+.PARAMETER IncludeHiddenFolders
+   Includes files inside dot-prefixed folders such as .codex and .git.
+   By default hidden folders are excluded.
+
 .PARAMETER ShowCopiedFiles
    If specified (or if “showCopiedFiles” is true in config.json), after copying
    to clipboard the script will list every file that was included.
@@ -84,6 +88,9 @@ Param(
     [hashtable]$Replacements,
 
     [Parameter()]
+    [switch]  $IncludeHiddenFolders,
+
+    [Parameter()]
     [switch]  $ShowCopiedFiles
 )
 
@@ -116,25 +123,46 @@ function Get-FilesToInclude {
         [string[]] $IgnoreFiles   = @(),
 
         [Parameter()]
+        [switch]   $IncludeHiddenFolders,
+
+        [Parameter()]
 
         [ValidateRange(0, [long]::MaxValue)]
         [long]     $MaxFileSize
     )
-    $allFiles = Get-ChildItem -Path (Join-Path $RepoRoot '*') -Recurse -File -ErrorAction Stop
+    $getChildItemParams = @{
+        Path        = (Join-Path $RepoRoot '*')
+        Recurse     = $true
+        File        = $true
+        ErrorAction = 'Stop'
+    }
+    if ($IncludeHiddenFolders) {
+        $getChildItemParams.Force = $true
+    }
+
+    $allFiles = Get-ChildItem @getChildItemParams
     $result = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+    $resolvedRepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 
     foreach ($f in $allFiles) {
         $reason = $null
+        $relativePath = [IO.Path]::GetRelativePath($resolvedRepoRoot, $f.FullName)
+        $relativeDirectory = [IO.Path]::GetDirectoryName($relativePath)
+        $relativeDirSegments = if ($relativeDirectory) { @($relativeDirectory -split '[\\/]') } else { @() }
+
+        if (-not $reason -and -not $IncludeHiddenFolders) {
+            if ($relativeDirSegments | Where-Object { $_ -like '.*' -and $_ -ne '.' -and $_ -ne '..' }) {
+                $reason = 'hidden folder excluded by default'
+            }
+        }
 
         # Folder pattern check
-
-        $dirs = $f.DirectoryName.Split([IO.Path]::DirectorySeparatorChar) 
-        foreach ($folderPattern in $IgnoreFolders) {
-            $sepRegex   = [Regex]::Escape([IO.Path]::DirectorySeparatorChar)
-            $segments   = $f.DirectoryName -split $sepRegex      # safe on Win & *nix
-            if ($segments -like $folderPattern) {
-                $reason = "matched ignore-folder '$folderPattern'"
-                break
+        if (-not $reason) {
+            foreach ($folderPattern in $IgnoreFolders) {
+                if ($relativeDirSegments -like $folderPattern) {
+                    $reason = "matched ignore-folder '$folderPattern'"
+                    break
+                }
             }
         }
 
@@ -243,6 +271,13 @@ $repoPath = if ($PSBoundParameters.ContainsKey('RepoPath')) { $RepoPath } else {
 $maxFileSize = if ($PSBoundParameters.ContainsKey('MaxFileSize')) { $MaxFileSize } else { [long]$config.maxFileSize }
 $ignoreFolders  = if ($PSBoundParameters.ContainsKey('IgnoreFolders') -and $IgnoreFolders) { $IgnoreFolders } else { @($config.ignoreFolders) }
 $ignoreFiles = if ($PSBoundParameters.ContainsKey('IgnoreFiles')   -and $IgnoreFiles)   { $IgnoreFiles }   else { @($config.ignoreFiles) }
+$includeHiddenFolders = if ($PSBoundParameters.ContainsKey('IncludeHiddenFolders')) {
+    $IncludeHiddenFolders.IsPresent
+} elseif ($null -ne $config.includeHiddenFolders) {
+    [bool]$config.includeHiddenFolders
+} else {
+    $false
+}
 $replacements = if ($PSBoundParameters.ContainsKey('Replacements')) { $Replacements } else {
     $tempHashtable = @{}; foreach ($p in $config.replacements.PSObject.Properties) { $tempHashtable[$p.Name] = $p.Value }; $tempHashtable
 }
@@ -260,6 +295,7 @@ $filesToCopy = Get-FilesToInclude `
            -RepoRoot      $repoPath `
            -IgnoreFolders $ignoreFolders `
            -IgnoreFiles   $ignoreFiles `
+           -IncludeHiddenFolders:$includeHiddenFolders `
            -MaxFileSize   $maxFileSize
 
 
